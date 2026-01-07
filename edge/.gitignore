@@ -1,0 +1,28 @@
+# 在PowerShell中创建.gitignore
+@'
+# Visual Studio
+.vs/
+Debug/
+Release/
+x64/
+x86/
+*.vcxproj.user
+*.suo
+
+# 编译输出
+*.exe
+*.dll
+*.pdb
+*.obj
+*.lib
+
+# 第三方库二进制
+thirdparty/ffmpeg/bin/
+
+# 大文件
+*.mp4
+*.avi
+
+# 系统文件
+Thumbs.db
+'@ | Out-File -FilePath .gitignore -Encoding UTF8
