@@ -1,6 +1,7 @@
 # 在PowerShell中创建.gitignore
 @'
 # Visual Studio
+**/.vs/
 .vs/
 Debug/
 Release/
