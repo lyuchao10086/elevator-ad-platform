@@ -1,0 +1,37 @@
+# deploy/docker-compose.yml
+version: '3.8'
+
+services:
+  gateway:
+    build: ../cloud
+    image: elevator-gateway:latest
+    ports:
+      - "8080:8080"    # WebSocket
+      - "50051:50051"  # gRPC
+      - "9090:9090"    # HTTP监控
+    volumes:
+      - ./configs/gateway.yaml:/app/configs/config.yaml:ro
+    environment:
+      - ENVIRONMENT=production
+    depends_on:
+      - kafka
+      - redis
+    networks:
+      - elevator-net
+
+  kafka:
+    image: bitnami/kafka:latest
+    ports:
+      - "9092:9092"
+    environment:
+      - KAFKA_CFG_NODE_ID=0
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092
+    networks:
+      - elevator-net
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - elevator-net
