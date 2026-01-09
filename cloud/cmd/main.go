@@ -19,5 +19,5 @@ func main() {
 	http.HandleFunc("/api/send", handler.HandleCommand)
 
 	log.Println("网关启动在 :8080")
-	http.ListenAndServe(":8080", nil)
+	http.ListenAndServe(":8080", nil) //实现websocket/HTTP监听功能
 }
