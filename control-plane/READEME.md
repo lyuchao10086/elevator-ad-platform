@@ -27,7 +27,7 @@
 ## 目录结构说明
 
 ```text
-cloud/
+control-plane/
 ├─ app/
 │  ├─ main.py            # FastAPI 应用入口
 │  ├─ api/               # API 路由层
