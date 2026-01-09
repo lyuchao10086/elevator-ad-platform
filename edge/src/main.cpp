@@ -1,73 +1,73 @@
-// main.cpp - ×îÖÕµÄ²¥·ÅÆ÷Èë¿Ú
+// main.cpp - æœ€ç»ˆçš„æ’­æ”¾å™¨å…¥å£
 #include "Video_Player.h"
 #include <iostream>
 #include <chrono>
 #include <thread>
 
-// ½ûÓÃSDLµÄmainÖØ¶¨Òå
+// ç¦ç”¨SDLçš„mainé‡å®šä¹‰
 #ifdef main
 #undef main
 #endif
 
 int main(int argc, char* argv[]) {
-    std::cout << "=== ÖÇÄÜ¹ã¸æ²¥·ÅÆ÷ ===" << std::endl;
+    std::cout << "=== æ™ºèƒ½å¹¿å‘Šæ’­æ”¾å™¨ ===" << std::endl;
 
     std::string video_file = "test.mp4";
 
-    // ¼ì²éÎÄ¼şÊÇ·ñ´æÔÚ
+    // æ£€æŸ¥æ–‡ä»¶æ˜¯å¦å­˜åœ¨
     FILE* test = fopen(video_file.c_str(), "rb");
     if (!test) {
-        std::cout << "Î´ÕÒµ½test.mp4£¬´´½¨²âÊÔÊÓÆµ..." << std::endl;
+        std::cout << "æœªæ‰¾åˆ°test.mp4ï¼Œåˆ›å»ºæµ‹è¯•è§†é¢‘..." << std::endl;
         system("ffmpeg -f lavfi -i testsrc=size=640x480:rate=30:duration=10 -c:v libx264 -pix_fmt yuv420p test.mp4 -y 2>nul");
     }
     else {
         fclose(test);
     }
 
-    // ´´½¨²¥·ÅÆ÷
+    // åˆ›å»ºæ’­æ”¾å™¨
     VideoPlayer player;
 
-    std::cout << "\n1. ¼ÓÔØÊÓÆµÎÄ¼ş..." << std::endl;
+    std::cout << "\n1. åŠ è½½è§†é¢‘æ–‡ä»¶..." << std::endl;
     if (!player.Load(video_file)) {
-        std::cerr << "¼ÓÔØÊÓÆµÊ§°Ü£¡" << std::endl;
-        std::cout << "°´EnterÍË³ö..." << std::endl;
+        std::cerr << "åŠ è½½è§†é¢‘å¤±è´¥ï¼" << std::endl;
+        std::cout << "æŒ‰Enteré€€å‡º..." << std::endl;
         std::cin.get();
         return -1;
     }
 
-    std::cout << "\n2. ¿ªÊ¼²¥·Å..." << std::endl;
-    std::cout << "   ¿ØÖÆËµÃ÷:" << std::endl;
-    std::cout << "   - ¿Õ¸ñ¼ü: ÔİÍ£/¼ÌĞø" << std::endl;
-    std::cout << "   - ESC¼ü: ÍË³ö" << std::endl;
-    std::cout << "   - ¹Ø±Õ´°¿Ú: ÍË³ö" << std::endl;
+    std::cout << "\n2. å¼€å§‹æ’­æ”¾..." << std::endl;
+    std::cout << "   æ§åˆ¶è¯´æ˜:" << std::endl;
+    std::cout << "   - ç©ºæ ¼é”®: æš‚åœ/ç»§ç»­" << std::endl;
+    std::cout << "   - ESCé”®: é€€å‡º" << std::endl;
+    std::cout << "   - å…³é—­çª—å£: é€€å‡º" << std::endl;
 
     if (!player.Play()) {
-        std::cerr << "²¥·ÅÊ§°Ü£¡" << std::endl;
-        std::cout << "°´EnterÍË³ö..." << std::endl;
+        std::cerr << "æ’­æ”¾å¤±è´¥ï¼" << std::endl;
+        std::cout << "æŒ‰Enteré€€å‡º..." << std::endl;
         std::cin.get();
         return -1;
     }
 
-    std::cout << "\n3. ²¥·ÅÖĞ..." << std::endl;
+    std::cout << "\n3. æ’­æ”¾ä¸­..." << std::endl;
 
-    // µÈ´ı²¥·Å½áÊø
+    // ç­‰å¾…æ’­æ”¾ç»“æŸ
     while (player.IsPlaying() || player.IsWindowOpen()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-        // Ã¿5ÃëÏÔÊ¾Ò»´Î×´Ì¬
+        // æ¯5ç§’æ˜¾ç¤ºä¸€æ¬¡çŠ¶æ€
         static auto last_report = std::chrono::steady_clock::now();
         auto now = std::chrono::steady_clock::now();
         if (std::chrono::duration_cast<std::chrono::seconds>(now - last_report).count() >= 5) {
-            std::cout << "²¥·Å×´Ì¬: "
-                << (player.IsPlaying() ? "²¥·ÅÖĞ" : "Í£Ö¹")
-                << (player.IsPaused() ? " (ÔİÍ£)" : "")
+            std::cout << "æ’­æ”¾çŠ¶æ€: "
+                << (player.IsPlaying() ? "æ’­æ”¾ä¸­" : "åœæ­¢")
+                << (player.IsPaused() ? " (æš‚åœ)" : "")
                 << std::endl;
             last_report = now;
         }
     }
 
-    std::cout << "\n4. ²¥·Å½áÊø£¡" << std::endl;
-    std::cout << "°´EnterÍË³ö..." << std::endl;
+    std::cout << "\n4. æ’­æ”¾ç»“æŸï¼" << std::endl;
+    std::cout << "æŒ‰Enteré€€å‡º..." << std::endl;
     std::cin.get();
 
     return 0;
