@@ -2,9 +2,11 @@ package gateway
 
 import (
 	"encoding/json"
-
+	"encoding/base64"
+	"bytes"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/gorilla/websocket"
 )
@@ -126,4 +128,28 @@ func (h *Handler) handleLogReport(deviceID string, payload json.RawMessage) {
 func (h *Handler) handleSnapshot(deviceID string, payload json.RawMessage) {
 	// 对应文档：截图上传 OSS 逻辑
 	log.Printf("[截图上报] 收到设备 %s 的截图，数据大小: %d 字节", deviceID, len(payload))
+
+	// 将截图以 base64 的 JSON 转发给 control-plane 的回调接口（如果配置了）
+	callback := os.Getenv("CONTROL_PLANE_SNAPSHOT_CALLBACK")
+	if callback == "" {
+		callback = "http://127.0.0.1:8000/api/v1/devices/snapshot/callback"
+	}
+
+	body := map[string]string{
+		"device_id":    deviceID,
+		"snapshot_b64": base64.StdEncoding.EncodeToString(payload),
+	}
+
+	b, err := json.Marshal(body)
+	if err != nil {
+		log.Printf("[截图转发] JSON 序列化失败: %v", err)
+		return
+	}
+
+	resp, err := http.Post(callback, "application/json", bytes.NewReader(b))
+	if err != nil {
+		log.Printf("[截图转发] POST 到 control-plane 失败: %v", err)
+		return
+	}
+	resp.Body.Close()
 }
