@@ -8,39 +8,39 @@
 #include <mutex>
 #include <condition_variable>
 
-// PIMPLÄ£Ê½
+// PIMPLæ¨¡å¼
 struct VideoPlayer::Impl {
-    // FFmpegÉÏÏÂÎÄ
+    // FFmpegä¸Šä¸‹æ–‡
     AVFormatContext* format_ctx = nullptr;
     AVCodecContext* video_codec_ctx = nullptr;
     AVStream* video_stream = nullptr;
     SwsContext* sws_ctx = nullptr;
 
-    // SDLÉÏÏÂÎÄ
+    // SDLä¸Šä¸‹æ–‡
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
     SDL_Texture* texture = nullptr;
 
-    // Ö¡¶ÓÁĞ
+    // å¸§é˜Ÿåˆ—
     struct Frame {
         std::unique_ptr<uint8_t[]> data;
         int width, height;
-        int64_t pts;  // ÏÔÊ¾Ê±¼ä´Á
+        int64_t pts;  // æ˜¾ç¤ºæ—¶é—´æˆ³
         ~Frame() = default;
     };
 
     std::queue<std::unique_ptr<Frame>> frame_queue;
     std::mutex queue_mutex;
     std::condition_variable queue_cv;
-    const size_t MAX_QUEUE_SIZE = 10;  // ÏŞÖÆ¶ÓÁĞ´óĞ¡£¬±ÜÃâÄÚ´æ±¬Õ¨
+    const size_t MAX_QUEUE_SIZE = 10;  // é™åˆ¶é˜Ÿåˆ—å¤§å°ï¼Œé¿å…å†…å­˜çˆ†ç‚¸
 
-    // ²¥·Å×´Ì¬
+    // æ’­æ”¾çŠ¶æ€
     std::atomic<bool> is_playing{ false };
     std::atomic<bool> is_paused{ false };
     std::atomic<bool> should_stop{ false };
     std::atomic<bool> window_open{ false };
 
-    // ÊÓÆµĞÅÏ¢
+    // è§†é¢‘ä¿¡æ¯
     int video_stream_index = -1;
     int width = 0;
     int height = 0;
@@ -48,16 +48,16 @@ struct VideoPlayer::Impl {
     int64_t duration_ms = 0;
     AVRational time_base;
 
-    // ²¥·ÅÊ±¼ä¿ØÖÆ
+    // æ’­æ”¾æ—¶é—´æ§åˆ¶
     std::chrono::steady_clock::time_point start_time;
     int64_t pause_time_accumulated = 0;
     int64_t pause_start_time = 0;
 
-    // Ïß³Ì
+    // çº¿ç¨‹
     std::unique_ptr<std::thread> decode_thread;
     std::unique_ptr<std::thread> render_thread;
 
-    // »Øµ÷º¯Êı
+    // å›è°ƒå‡½æ•°
     VideoPlayer::FrameCallback frame_callback;
 
     ~Impl() {
@@ -67,10 +67,10 @@ struct VideoPlayer::Impl {
     void Cleanup() {
         should_stop = true;
 
-        // »½ĞÑµÈ´ıµÄÏß³Ì
+        // å”¤é†’ç­‰å¾…çš„çº¿ç¨‹
         queue_cv.notify_all();
 
-        // µÈ´ıÏß³Ì½áÊø
+        // ç­‰å¾…çº¿ç¨‹ç»“æŸ
         if (decode_thread && decode_thread->joinable()) {
             decode_thread->join();
         }
@@ -78,7 +78,7 @@ struct VideoPlayer::Impl {
             render_thread->join();
         }
 
-        // ÇåÀíSDL
+        // æ¸…ç†SDL
         if (texture) {
             SDL_DestroyTexture(texture);
             texture = nullptr;
@@ -92,7 +92,7 @@ struct VideoPlayer::Impl {
             window = nullptr;
         }
 
-        // ÇåÀíFFmpeg
+        // æ¸…ç†FFmpeg
         if (sws_ctx) {
             sws_freeContext(sws_ctx);
             sws_ctx = nullptr;
@@ -104,7 +104,7 @@ struct VideoPlayer::Impl {
             avformat_close_input(&format_ctx);
         }
 
-        // Çå¿Õ¶ÓÁĞ
+        // æ¸…ç©ºé˜Ÿåˆ—
         std::lock_guard<std::mutex> lock(queue_mutex);
         while (!frame_queue.empty()) {
             frame_queue.pop();
@@ -120,7 +120,7 @@ struct VideoPlayer::Impl {
             SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
 
         if (!window) {
-            std::cerr << "´´½¨SDL´°¿ÚÊ§°Ü: " << SDL_GetError() << std::endl;
+            std::cerr << "åˆ›å»ºSDLçª—å£å¤±è´¥: " << SDL_GetError() << std::endl;
             return;
         }
 
@@ -128,71 +128,71 @@ struct VideoPlayer::Impl {
             SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
 
         if (!renderer) {
-            std::cerr << "´´½¨SDLäÖÈ¾Æ÷Ê§°Ü: " << SDL_GetError() << std::endl;
+            std::cerr << "åˆ›å»ºSDLæ¸²æŸ“å™¨å¤±è´¥: " << SDL_GetError() << std::endl;
             return;
         }
 
-        // ´´½¨ÎÆÀí£¨YUV420P¸ñÊ½£©
+        // åˆ›å»ºçº¹ç†ï¼ˆYUV420Pæ ¼å¼ï¼‰
         texture = SDL_CreateTexture(renderer,
-            SDL_PIXELFORMAT_YV12,  // YUV420P¸ñÊ½
+            SDL_PIXELFORMAT_YV12,  // YUV420Pæ ¼å¼
             SDL_TEXTUREACCESS_STREAMING,
             width, height);
 
         if (!texture) {
-            std::cerr << "´´½¨SDLÎÆÀíÊ§°Ü: " << SDL_GetError() << std::endl;
+            std::cerr << "åˆ›å»ºSDLçº¹ç†å¤±è´¥: " << SDL_GetError() << std::endl;
         }
 
         window_open = true;
-        std::cout << "SDL´°¿Ú´´½¨³É¹¦: " << width << "x" << height << std::endl;
+        std::cout << "SDLçª—å£åˆ›å»ºæˆåŠŸ: " << width << "x" << height << std::endl;
     }
 
-    // ½âÂëÏß³Ìº¯Êı
+    // è§£ç çº¿ç¨‹å‡½æ•°
     void DecodeThreadFunc() {
         AVPacket* packet = av_packet_alloc();
         AVFrame* frame = av_frame_alloc();
 
-        std::cout << "½âÂëÏß³ÌÆô¶¯" << std::endl;
-        std::cout << "Ô´¸ñÊ½: " << av_get_pix_fmt_name(video_codec_ctx->pix_fmt)
+        std::cout << "è§£ç çº¿ç¨‹å¯åŠ¨" << std::endl;
+        std::cout << "æºæ ¼å¼: " << av_get_pix_fmt_name(video_codec_ctx->pix_fmt)
             << " " << video_codec_ctx->width << "x" << video_codec_ctx->height << std::endl;
 
-        // ¹Ø¼ü£ºÈ·±£¿í¶ÈºÍ¸ß¶ÈÊÇÅ¼Êı£¨YUV420PÒªÇó£©
-        int target_width = (video_codec_ctx->width + 1) & ~1;  // ¶ÔÆëµ½Å¼Êı
+        // å…³é”®ï¼šç¡®ä¿å®½åº¦å’Œé«˜åº¦æ˜¯å¶æ•°ï¼ˆYUV420Pè¦æ±‚ï¼‰
+        int target_width = (video_codec_ctx->width + 1) & ~1;  // å¯¹é½åˆ°å¶æ•°
         int target_height = (video_codec_ctx->height + 1) & ~1;
 
-        std::cout << "Ä¿±ê·Ö±æÂÊ: " << target_width << "x" << target_height << std::endl;
+        std::cout << "ç›®æ ‡åˆ†è¾¨ç‡: " << target_width << "x" << target_height << std::endl;
 
-        // ´´½¨SWSÉÏÏÂÎÄ - Ê¹ÓÃÕıÈ·µÄ²ÎÊı
+        // åˆ›å»ºSWSä¸Šä¸‹æ–‡ - ä½¿ç”¨æ­£ç¡®çš„å‚æ•°
         sws_ctx = sws_getContext(
             video_codec_ctx->width, video_codec_ctx->height, video_codec_ctx->pix_fmt,
-            target_width, target_height, AV_PIX_FMT_YUV420P,  // Ä¿±ê¸ñÊ½¹Ì¶¨ÎªYUV420P
-            SWS_BICUBIC,  // Ê¹ÓÃ¸üºÃµÄËõ·ÅËã·¨
+            target_width, target_height, AV_PIX_FMT_YUV420P,  // ç›®æ ‡æ ¼å¼å›ºå®šä¸ºYUV420P
+            SWS_BICUBIC,  // ä½¿ç”¨æ›´å¥½çš„ç¼©æ”¾ç®—æ³•
             nullptr, nullptr, nullptr);
 
         if (!sws_ctx) {
-            std::cerr << "ÎŞ·¨´´½¨SWSÉÏÏÂÎÄ" << std::endl;
+            std::cerr << "æ— æ³•åˆ›å»ºSWSä¸Šä¸‹æ–‡" << std::endl;
             return;
         }
 
-        // ´´½¨Ä¿±êÖ¡
+        // åˆ›å»ºç›®æ ‡å¸§
         AVFrame* yuv_frame = av_frame_alloc();
         yuv_frame->format = AV_PIX_FMT_YUV420P;
         yuv_frame->width = target_width;
         yuv_frame->height = target_height;
 
-        // ¹Ø¼ü£º·ÖÅä¶ÔÆëµÄÄÚ´æ
-        int align = 32;  // 32×Ö½Ú¶ÔÆë£¬Ìá¸ßĞÔÄÜ
+        // å…³é”®ï¼šåˆ†é…å¯¹é½çš„å†…å­˜
+        int align = 32;  // 32å­—èŠ‚å¯¹é½ï¼Œæé«˜æ€§èƒ½
         if (av_frame_get_buffer(yuv_frame, align) < 0) {
-            std::cerr << "ÎŞ·¨·ÖÅäÖ¡»º³åÇø" << std::endl;
+            std::cerr << "æ— æ³•åˆ†é…å¸§ç¼“å†²åŒº" << std::endl;
             av_frame_free(&yuv_frame);
             return;
         }
 
-        // ¼ÆËãÔ¤ÆÚµÄÊı¾İ´óĞ¡
+        // è®¡ç®—é¢„æœŸçš„æ•°æ®å¤§å°
         int y_size = target_width * target_height;
-        int uv_size = y_size / 4;  // YUV420P: UV·ÖÁ¿ÊÇYµÄ1/4
-        std::cout << "Ô¤ÆÚÊı¾İ´óĞ¡: Y=" << y_size << " U/V=" << uv_size << std::endl;
+        int uv_size = y_size / 4;  // YUV420P: UVåˆ†é‡æ˜¯Yçš„1/4
+        std::cout << "é¢„æœŸæ•°æ®å¤§å°: Y=" << y_size << " U/V=" << uv_size << std::endl;
 
-        // Ö¡¼ÆÊıÆ÷
+        // å¸§è®¡æ•°å™¨
         int frame_count = 0;
         bool first_frame = true;
 
@@ -202,66 +202,66 @@ struct VideoPlayer::Impl {
                 continue;
             }
 
-            // ¶ÁÈ¡Êı¾İ°ü
+            // è¯»å–æ•°æ®åŒ…
             int ret = av_read_frame(format_ctx, packet);
             if (ret < 0) {
-                // ÎÄ¼ş½áÊø»ò´íÎó
+                // æ–‡ä»¶ç»“æŸæˆ–é”™è¯¯
                 if (ret == AVERROR_EOF) {
-                    std::cout << "ÊÓÆµ²¥·Å½áÊø" << std::endl;
-                    // ¿ÉÒÔÔÚÕâÀïÌí¼ÓÑ­»·²¥·ÅÂß¼­
+                    std::cout << "è§†é¢‘æ’­æ”¾ç»“æŸ" << std::endl;
+                    // å¯ä»¥åœ¨è¿™é‡Œæ·»åŠ å¾ªç¯æ’­æ”¾é€»è¾‘
                     av_seek_frame(format_ctx, video_stream_index, 0, AVSEEK_FLAG_BACKWARD);
                     continue;
                 }
                 break;
             }
 
-            // Ö»´¦ÀíÊÓÆµÁ÷
+            // åªå¤„ç†è§†é¢‘æµ
             if (packet->stream_index == video_stream_index) {
-                // ·¢ËÍµ½½âÂëÆ÷
+                // å‘é€åˆ°è§£ç å™¨
                 if (avcodec_send_packet(video_codec_ctx, packet) < 0) {
                     av_packet_unref(packet);
                     continue;
                 }
 
-                // ½ÓÊÕ½âÂëºóµÄÖ¡
+                // æ¥æ”¶è§£ç åçš„å¸§
                 while (avcodec_receive_frame(video_codec_ctx, frame) == 0) {
-                    // ´òÓ¡µÚÒ»Ö¡ÏêÏ¸ĞÅÏ¢
+                    // æ‰“å°ç¬¬ä¸€å¸§è¯¦ç»†ä¿¡æ¯
                     if (first_frame) {
                         first_frame = false;
-                        std::cout << "\nµÚÒ»Ö¡ÏêÏ¸ĞÅÏ¢:" << std::endl;
-                        std::cout << "  Ô­Ê¼³ß´ç: " << frame->width << "x" << frame->height << std::endl;
-                        std::cout << "  Ô­Ê¼¸ñÊ½: " << av_get_pix_fmt_name((AVPixelFormat)frame->format) << std::endl;
-                        std::cout << "  ĞĞ´óĞ¡: linesize[0]=" << frame->linesize[0]
+                        std::cout << "\nç¬¬ä¸€å¸§è¯¦ç»†ä¿¡æ¯:" << std::endl;
+                        std::cout << "  åŸå§‹å°ºå¯¸: " << frame->width << "x" << frame->height << std::endl;
+                        std::cout << "  åŸå§‹æ ¼å¼: " << av_get_pix_fmt_name((AVPixelFormat)frame->format) << std::endl;
+                        std::cout << "  è¡Œå¤§å°: linesize[0]=" << frame->linesize[0]
                             << " linesize[1]=" << frame->linesize[1]
                             << " linesize[2]=" << frame->linesize[2] << std::endl;
                     }
 
-                    // ×ª»»Ö¡¸ñÊ½
+                    // è½¬æ¢å¸§æ ¼å¼
                     sws_scale(sws_ctx,
                         frame->data, frame->linesize, 0, frame->height,
                         yuv_frame->data, yuv_frame->linesize);
 
-                    // ¼ì²éÊı¾İÓĞĞ§ĞÔ
+                    // æ£€æŸ¥æ•°æ®æœ‰æ•ˆæ€§
                     if (!yuv_frame->data[0] || !yuv_frame->data[1] || !yuv_frame->data[2]) {
-                        std::cerr << "×ª»»ºóµÄÖ¡Êı¾İÎª¿Õ" << std::endl;
+                        std::cerr << "è½¬æ¢åçš„å¸§æ•°æ®ä¸ºç©º" << std::endl;
                         continue;
                     }
 
-                    // µ÷ÊÔĞÅÏ¢
+                    // è°ƒè¯•ä¿¡æ¯
                     if (frame_count == 0) {
-                        std::cout << "\n×ª»»ºóÖ¡ĞÅÏ¢:" << std::endl;
-                        std::cout << "  YÆ½ÃæĞĞ´óĞ¡: " << yuv_frame->linesize[0] << std::endl;
-                        std::cout << "  UÆ½ÃæĞĞ´óĞ¡: " << yuv_frame->linesize[1] << std::endl;
-                        std::cout << "  VÆ½ÃæĞĞ´óĞ¡: " << yuv_frame->linesize[2] << std::endl;
+                        std::cout << "\nè½¬æ¢åå¸§ä¿¡æ¯:" << std::endl;
+                        std::cout << "  Yå¹³é¢è¡Œå¤§å°: " << yuv_frame->linesize[0] << std::endl;
+                        std::cout << "  Uå¹³é¢è¡Œå¤§å°: " << yuv_frame->linesize[1] << std::endl;
+                        std::cout << "  Vå¹³é¢è¡Œå¤§å°: " << yuv_frame->linesize[2] << std::endl;
                     }
 
-                    // ´´½¨Ö¡Êı¾İ
+                    // åˆ›å»ºå¸§æ•°æ®
                     auto video_frame = std::make_unique<Frame>();
                     video_frame->width = target_width;
                     video_frame->height = target_height;
                     video_frame->pts = frame->pts;
 
-                    // ¼ÆËãÃ¿¸öÆ½ÃæµÄ´óĞ¡
+                    // è®¡ç®—æ¯ä¸ªå¹³é¢çš„å¤§å°
                     int y_plane_size = target_width * target_height;
                     int uv_plane_size = y_plane_size / 4;
                     int total_size = y_plane_size + uv_plane_size * 2;
@@ -269,26 +269,26 @@ struct VideoPlayer::Impl {
                     video_frame->data = std::make_unique<uint8_t[]>(total_size);
                     uint8_t* dst = video_frame->data.get();
 
-                    // ¹Ø¼ü£ºÕıÈ·¸´ÖÆYUVÊı¾İ
-                    // 1. ¸´ÖÆYÆ½Ãæ£¨È«³ß´ç£©
+                    // å…³é”®ï¼šæ­£ç¡®å¤åˆ¶YUVæ•°æ®
+                    // 1. å¤åˆ¶Yå¹³é¢ï¼ˆå…¨å°ºå¯¸ï¼‰
                     for (int y = 0; y < target_height; y++) {
                         memcpy(dst, yuv_frame->data[0] + y * yuv_frame->linesize[0], target_width);
                         dst += target_width;
                     }
 
-                    // 2. ¸´ÖÆUÆ½Ãæ£¨°ë³ß´ç£©
+                    // 2. å¤åˆ¶Uå¹³é¢ï¼ˆåŠå°ºå¯¸ï¼‰
                     for (int y = 0; y < target_height / 2; y++) {
                         memcpy(dst, yuv_frame->data[1] + y * yuv_frame->linesize[1], target_width / 2);
                         dst += target_width / 2;
                     }
 
-                    // 3. ¸´ÖÆVÆ½Ãæ£¨°ë³ß´ç£©
+                    // 3. å¤åˆ¶Vå¹³é¢ï¼ˆåŠå°ºå¯¸ï¼‰
                     for (int y = 0; y < target_height / 2; y++) {
                         memcpy(dst, yuv_frame->data[2] + y * yuv_frame->linesize[2], target_width / 2);
                         dst += target_width / 2;
                     }
 
-                    // Ìí¼Óµ½¶ÓÁĞ
+                    // æ·»åŠ åˆ°é˜Ÿåˆ—
                     {
                         std::lock_guard<std::mutex> lock(queue_mutex);
                         if (frame_queue.size() < MAX_QUEUE_SIZE) {
@@ -297,17 +297,17 @@ struct VideoPlayer::Impl {
                         }
                     }
 
-                    // »Øµ÷£¨ÓÃÓÚµ÷ÊÔ£©
+                    // å›è°ƒï¼ˆç”¨äºè°ƒè¯•ï¼‰
                     if (frame_callback) {
                         frame_callback(video_frame->data.get(), target_width, target_height, target_width);
                     }
 
                     frame_count++;
                     if (frame_count % 30 == 0) {
-                        std::cout << "ÒÑ½âÂë " << frame_count << " Ö¡" << std::endl;
+                        std::cout << "å·²è§£ç  " << frame_count << " å¸§" << std::endl;
                     }
 
-                    // ¼òµ¥µÄÖ¡ÂÊ¿ØÖÆ
+                    // ç®€å•çš„å¸§ç‡æ§åˆ¶
                     if (frame_rate > 0) {
                         std::this_thread::sleep_for(
                             std::chrono::milliseconds(static_cast<int>(1000 / frame_rate))
@@ -319,18 +319,18 @@ struct VideoPlayer::Impl {
             av_packet_unref(packet);
         }
 
-        std::cout << "½âÂëÏß³Ì½áÊø£¬¹²½âÂë " << frame_count << " Ö¡" << std::endl;
+        std::cout << "è§£ç çº¿ç¨‹ç»“æŸï¼Œå…±è§£ç  " << frame_count << " å¸§" << std::endl;
 
-        // ÇåÀí×ÊÔ´
+        // æ¸…ç†èµ„æº
         av_frame_free(&yuv_frame);
         av_frame_free(&frame);
         av_packet_free(&packet);
     }
 
-    // äÖÈ¾Ïß³Ìº¯Êı
+    // æ¸²æŸ“çº¿ç¨‹å‡½æ•°
     void RenderThreadFunc() {
         while (!should_stop && window_open) {
-            // ´¦ÀíSDLÊÂ¼ş
+            // å¤„ç†SDLäº‹ä»¶
             SDL_Event event;
             while (SDL_PollEvent(&event)) {
                 if (event.type == SDL_QUIT) {
@@ -341,7 +341,7 @@ struct VideoPlayer::Impl {
                     switch (event.key.keysym.sym) {
                     case SDLK_SPACE:
                         is_paused = !is_paused;
-                        std::cout << (is_paused ? "ÒÑÔİÍ£" : "ÒÑ»Ö¸´") << std::endl;
+                        std::cout << (is_paused ? "å·²æš‚åœ" : "å·²æ¢å¤") << std::endl;
                         break;
                     case SDLK_ESCAPE:
                         should_stop = true;
@@ -355,7 +355,7 @@ struct VideoPlayer::Impl {
                 }
             }
 
-            // äÖÈ¾Ö¡
+            // æ¸²æŸ“å¸§
             if (!is_paused) {
                 std::unique_ptr<Frame> frame;
                 {
@@ -371,7 +371,7 @@ struct VideoPlayer::Impl {
                 }
 
                 if (frame && renderer && texture) {
-                    // ¸üĞÂÎÆÀí
+                    // æ›´æ–°çº¹ç†
                     int y_size = frame->width * frame->height;
                     int uv_size = y_size / 4;
 
@@ -380,14 +380,14 @@ struct VideoPlayer::Impl {
                         frame->data.get() + y_size, frame->width / 2,       // U
                         frame->data.get() + y_size + uv_size, frame->width / 2); // V
 
-                    // äÖÈ¾
+                    // æ¸²æŸ“
                     SDL_RenderClear(renderer);
                     SDL_RenderCopy(renderer, texture, nullptr, nullptr);
                     SDL_RenderPresent(renderer);
                 }
             }
 
-            // ¿ØÖÆÖ¡ÂÊ
+            // æ§åˆ¶å¸§ç‡
             std::this_thread::sleep_for(std::chrono::milliseconds(16)); // ~60fps
         }
 
@@ -395,7 +395,7 @@ struct VideoPlayer::Impl {
     }
 };
 
-// VideoPlayer³ÉÔ±º¯ÊıÊµÏÖ
+// VideoPlayeræˆå‘˜å‡½æ•°å®ç°
 VideoPlayer::VideoPlayer() : pImpl(std::make_unique<Impl>()) {
     av_log_set_level(AV_LOG_ERROR);
 }
@@ -417,21 +417,21 @@ bool VideoPlayer::Load(const std::string& filepath) {
     pImpl->Cleanup();
     pImpl->should_stop = false;
 
-    std::cout << "¼ÓÔØÊÓÆµ: " << filepath << std::endl;
+    std::cout << "åŠ è½½è§†é¢‘: " << filepath << std::endl;
 
-    // 1. ´ò¿ªÎÄ¼ş
+    // 1. æ‰“å¼€æ–‡ä»¶
     if (avformat_open_input(&pImpl->format_ctx, filepath.c_str(), nullptr, nullptr) < 0) {
-        std::cerr << "ÎŞ·¨´ò¿ªÎÄ¼ş: " << filepath << std::endl;
+        std::cerr << "æ— æ³•æ‰“å¼€æ–‡ä»¶: " << filepath << std::endl;
         return false;
     }
 
-    // 2. »ñÈ¡Á÷ĞÅÏ¢
+    // 2. è·å–æµä¿¡æ¯
     if (avformat_find_stream_info(pImpl->format_ctx, nullptr) < 0) {
-        std::cerr << "ÎŞ·¨»ñÈ¡Á÷ĞÅÏ¢" << std::endl;
+        std::cerr << "æ— æ³•è·å–æµä¿¡æ¯" << std::endl;
         return false;
     }
 
-    // 3. ²éÕÒÊÓÆµÁ÷
+    // 3. æŸ¥æ‰¾è§†é¢‘æµ
     pImpl->video_stream_index = -1;
     for (unsigned int i = 0; i < pImpl->format_ctx->nb_streams; i++) {
         if (pImpl->format_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
@@ -442,28 +442,28 @@ bool VideoPlayer::Load(const std::string& filepath) {
     }
 
     if (pImpl->video_stream_index == -1) {
-        std::cerr << "Î´ÕÒµ½ÊÓÆµÁ÷" << std::endl;
+        std::cerr << "æœªæ‰¾åˆ°è§†é¢‘æµ" << std::endl;
         return false;
     }
 
-    // 4. »ñÈ¡½âÂëÆ÷
+    // 4. è·å–è§£ç å™¨
     AVCodecParameters* codecpar = pImpl->video_stream->codecpar;
     const AVCodec* codec = avcodec_find_decoder(codecpar->codec_id);
     if (!codec) {
-        std::cerr << "²»Ö§³ÖµÄ½âÂëÆ÷: " << codecpar->codec_id << std::endl;
+        std::cerr << "ä¸æ”¯æŒçš„è§£ç å™¨: " << codecpar->codec_id << std::endl;
         return false;
     }
 
-    // 5. ´´½¨½âÂëÆ÷ÉÏÏÂÎÄ
+    // 5. åˆ›å»ºè§£ç å™¨ä¸Šä¸‹æ–‡
     pImpl->video_codec_ctx = avcodec_alloc_context3(codec);
     avcodec_parameters_to_context(pImpl->video_codec_ctx, codecpar);
 
     if (avcodec_open2(pImpl->video_codec_ctx, codec, nullptr) < 0) {
-        std::cerr << "ÎŞ·¨´ò¿ª½âÂëÆ÷" << std::endl;
+        std::cerr << "æ— æ³•æ‰“å¼€è§£ç å™¨" << std::endl;
         return false;
     }
 
-    // 6. »ñÈ¡ÊÓÆµĞÅÏ¢
+    // 6. è·å–è§†é¢‘ä¿¡æ¯
     pImpl->width = pImpl->video_codec_ctx->width;
     pImpl->height = pImpl->video_codec_ctx->height;
     pImpl->time_base = pImpl->video_stream->time_base;
@@ -476,31 +476,31 @@ bool VideoPlayer::Load(const std::string& filepath) {
         pImpl->duration_ms = pImpl->format_ctx->duration * 1000 / AV_TIME_BASE;
     }
 
-    std::cout << "ÊÓÆµĞÅÏ¢:" << std::endl;
-    std::cout << "  ·Ö±æÂÊ: " << pImpl->width << "x" << pImpl->height << std::endl;
-    std::cout << "  Ö¡ÂÊ: " << pImpl->frame_rate << " fps" << std::endl;
-    std::cout << "  Ê±³¤: " << (pImpl->duration_ms / 1000.0) << " Ãë" << std::endl;
-    std::cout << "  ±àÂëÆ÷: " << codec->name << std::endl;
+    std::cout << "è§†é¢‘ä¿¡æ¯:" << std::endl;
+    std::cout << "  åˆ†è¾¨ç‡: " << pImpl->width << "x" << pImpl->height << std::endl;
+    std::cout << "  å¸§ç‡: " << pImpl->frame_rate << " fps" << std::endl;
+    std::cout << "  æ—¶é•¿: " << (pImpl->duration_ms / 1000.0) << " ç§’" << std::endl;
+    std::cout << "  ç¼–ç å™¨: " << codec->name << std::endl;
 
     return true;
 }
 
 bool VideoPlayer::Play() {
     if (!pImpl->video_codec_ctx) {
-        std::cerr << "ÇëÏÈ¼ÓÔØÊÓÆµ" << std::endl;
+        std::cerr << "è¯·å…ˆåŠ è½½è§†é¢‘" << std::endl;
         return false;
     }
 
     if (pImpl->is_playing) {
-        std::cout << "ÊÓÆµÒÑÔÚ²¥·ÅÖĞ" << std::endl;
+        std::cout << "è§†é¢‘å·²åœ¨æ’­æ”¾ä¸­" << std::endl;
         return true;
     }
 
-    // ´´½¨´°¿Ú
+    // åˆ›å»ºçª—å£
     pImpl->CreateSDLWindow("Video Player");
 
     if (!pImpl->window) {
-        std::cerr << "ÎŞ·¨´´½¨²¥·Å´°¿Ú" << std::endl;
+        std::cerr << "æ— æ³•åˆ›å»ºæ’­æ”¾çª—å£" << std::endl;
         return false;
     }
 
@@ -508,17 +508,17 @@ bool VideoPlayer::Play() {
     pImpl->is_paused = false;
     pImpl->should_stop = false;
 
-    // Æô¶¯½âÂëÏß³Ì
+    // å¯åŠ¨è§£ç çº¿ç¨‹
     pImpl->decode_thread = std::make_unique<std::thread>([this]() {
         pImpl->DecodeThreadFunc();
         });
 
-    // Æô¶¯äÖÈ¾Ïß³Ì
+    // å¯åŠ¨æ¸²æŸ“çº¿ç¨‹
     pImpl->render_thread = std::make_unique<std::thread>([this]() {
         pImpl->RenderThreadFunc();
         });
 
-    std::cout << "¿ªÊ¼²¥·ÅÊÓÆµ..." << std::endl;
+    std::cout << "å¼€å§‹æ’­æ”¾è§†é¢‘..." << std::endl;
     return true;
 }
 
@@ -526,7 +526,7 @@ bool VideoPlayer::Pause() {
     if (!pImpl->is_playing) return false;
 
     pImpl->is_paused = !pImpl->is_paused;
-    std::cout << (pImpl->is_paused ? "ÒÑÔİÍ£" : "ÒÑ»Ö¸´") << std::endl;
+    std::cout << (pImpl->is_paused ? "å·²æš‚åœ" : "å·²æ¢å¤") << std::endl;
     return true;
 }
 
@@ -540,7 +540,7 @@ void VideoPlayer::SetFrameCallback(FrameCallback callback) {
     pImpl->frame_callback = callback;
 }
 
-// »ñÈ¡ĞÅÏ¢µÄ·½·¨
+// è·å–ä¿¡æ¯çš„æ–¹æ³•
 int VideoPlayer::GetWidth() const { return pImpl->width; }
 int VideoPlayer::GetHeight() const { return pImpl->height; }
 double VideoPlayer::GetFrameRate() const { return pImpl->frame_rate; }
@@ -550,10 +550,10 @@ bool VideoPlayer::IsPaused() const { return pImpl->is_paused; }
 bool VideoPlayer::IsWindowOpen() const { return pImpl->window_open; }
 
 int64_t VideoPlayer::GetCurrentPosition() const {
-    return 0; // TODO: ÊµÏÖ¾«È·µÄÊ±¼ä¼ÆËã
+    return 0; // TODO: å®ç°ç²¾ç¡®çš„æ—¶é—´è®¡ç®—
 }
 
 void VideoPlayer::Seek(int64_t timestamp_ms) {
-    // TODO: ÊµÏÖÌø×ª
-    std::cout << "Ìø×ªµ½: " << timestamp_ms << "ms" << std::endl;
+    // TODO: å®ç°è·³è½¬
+    std::cout << "è·³è½¬åˆ°: " << timestamp_ms << "ms" << std::endl;
 }
