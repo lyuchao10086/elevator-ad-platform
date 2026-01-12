@@ -134,8 +134,8 @@ func (m *DeviceManager) GetConnection(deviceID string) (*websocket.Conn, bool) {
 // 核心函数：通知 Python 业务中心设备状态变更
 func (m *DeviceManager) notifyPythonStatus(deviceID string, status string) {
 	// 这里的 URL 对应 Python 后端的接收接口
-	// pythonWebhookURL := "http://127.0.0.1:5000/api/device/status"
-	pythonWebhookURL := "https://webhook.site/cbb5670e-dd27-44ca-b97f-8695451e4b5a"
+	pythonWebhookURL := "http://127.0.0.1:5000/api/device/status"
+	//pythonWebhookURL := "https://webhook.site/cbb5670e-dd27-44ca-b97f-8695451e4b5a"
 
 	// 构造发送的消息体
 	payload := map[string]interface{}{

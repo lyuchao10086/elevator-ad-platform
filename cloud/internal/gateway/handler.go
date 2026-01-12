@@ -1,9 +1,9 @@
 package gateway
 
 import (
-	"encoding/json"
-	"encoding/base64"
 	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -128,7 +128,7 @@ func (h *Handler) HandleCommand(w http.ResponseWriter, r *http.Request) {
 		"payload": req.Command,
 		"data":    req.Data,
 	})
-
+	//告诉python后端状态码
 	w.WriteHeader(http.StatusOK)
 	// --- 在 handler.go 文件末尾添加以下内容 ---
 
