@@ -1,6 +1,6 @@
 # elevator-ad-platform
 # 详细模块设计与关键函数
-## 1. 端侧：智能播放终端 (C++ 17/20)
+## 1. 端侧：智能播放终端 (gO + Vue + python)
 目标：极致的稳定性（7x24不崩溃）、流畅的视频播放、断网也能工作。 推荐库：FFmpeg (解码), Qt/SDL (渲染), SQLite (本地库), CURL (下载)。
 
 ### A. 播放引擎模块 (Player Engine)
@@ -192,7 +192,7 @@
     void OnSystemInit()
     重启后检查日志并上报到云
 
-## 2. 通信层：高性能接入网关 (Go)
+## 2. 通信层：高性能接入网关 (C++)
 目标：承载成千上万台电梯终端的并发连接，作为端与云的“路由器”。 协议：推荐自定义协议 over TCP 或 WebSocket（为了双向通信）。
 
 ### A. 连接管理 (Connection Manager)
@@ -211,7 +211,7 @@
     func PushCommand(deviceID string, cmd Command):
     功能: 供Python后端调用（通过gRPC/HTTP接口）。查找该deviceID对应的内存中的Connection，将指令（如“更新播放列表”）通过长连接下发给C++端。
 
-## 3. 云端：业务控制中心 (Python)
+## 3. 云端：业务控制中心 (Go + vue + python)
 目标：复杂的业务逻辑、Web界面、数据统计。 框架：FastAPI 或 Django。
 
 ### A. 设备与内容管理 (Device & CMS)
