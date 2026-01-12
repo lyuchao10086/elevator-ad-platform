@@ -1,6 +1,6 @@
 # elevator-ad-platform
 # 详细模块设计与关键函数
-## 1. 端侧：智能播放终端 (gO + Vue + python)
+## 1. 端侧：智能播放终端 (Go + Vue + python)
 目标：极致的稳定性（7x24不崩溃）、流畅的视频播放、断网也能工作。 推荐库：FFmpeg (解码), Qt/SDL (渲染), SQLite (本地库), CURL (下载)。
 
 ### A. 播放引擎模块 (Player Engine)
