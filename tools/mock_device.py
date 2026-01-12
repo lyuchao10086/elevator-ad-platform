@@ -72,8 +72,9 @@ def simulate_elevator(device_id):
 
 if __name__ == "__main__":
     # 定义要模拟的设备列表
-    # 在实际测试中，你可以把 range 改成 1000 来测试网关性能
-    test_devices = [f"ELEVATOR_SH_00{i}" for i in range(1, 4)]
+    # 在实际测试中，你可以把 range 改成 1000 来测试网关性能  
+    # 这里模拟3台设备
+    test_devices = [f"ELEVATOR_SH_00{i}" for i in range(1, 4)] 
     
     threads = []
     print(f"正在启动 {len(test_devices)} 台模拟设备...")

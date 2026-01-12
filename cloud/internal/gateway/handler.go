@@ -56,24 +56,43 @@ func (h *Handler) HandleWebsocket(w http.ResponseWriter, r *http.Request) {
 
 // 3. 消息分发路由器
 // 对应文档：func DispatchMessage(msg []byte)
+// 3. 消息分发路由器
+// 对应文档：func DispatchMessage(msg []byte)
 func (h *Handler) DispatchMessage(deviceID string, conn *websocket.Conn) {
+	// 使用 defer 确保函数退出时清理资源
+	defer func() {
+		log.Printf("[网关] 设备 %s 连接断开，正在清理资源...", deviceID)
+		h.Manager.Unregister(deviceID)
+		conn.Close()
+	}()
+
 	for {
 		var msg DeviceMessage
+		// 读取客户端发来的 JSON 消息
 		if err := conn.ReadJSON(&msg); err != nil {
-			h.Manager.Unregister(deviceID)
+			// 如果读取失败（如客户端主动关闭或断网），直接跳出循环触发 defer
 			break
 		}
 
+		// --- 核心修改点：只要收到任何包，就刷新该设备在 Manager 里的活跃时间 ---
+		h.Manager.UpdateActiveTime(deviceID)
+
+		// 根据消息类型进行分发
 		switch msg.Type {
 		case "heartbeat":
-			// 更新 KeepAliveManager 状态
+			// 响应心跳，维持长连接
 			conn.WriteJSON(map[string]string{"type": "pong"})
+
 		case "log":
-			// 写入 Kafka 或数据库逻辑
+			// 处理播放日志上报
 			h.handleLogReport(deviceID, msg.Payload)
+
 		case "snapshot":
-			// 上传 OSS 逻辑
+			// 处理截图上传逻辑
 			h.handleSnapshot(deviceID, msg.Payload)
+
+		default:
+			log.Printf("[网关] 收到来自 %s 的未知类型消息: %s", deviceID, msg.Type)
 		}
 	}
 }
