@@ -1,0 +1,26 @@
+// shared/proto/gateway.proto
+syntax = "proto3";
+
+package gateway.v1;
+
+option go_package = "github.com/lyuchao10086/elevator-ad-platform/shared/proto";
+option python_package = "elevator_platform.shared.proto";
+
+// Python和Go共用的协议定义
+message DeviceStatus {
+    string device_id = 1;
+    bool online = 2;
+    int64 last_seen = 3;
+    map<string, string> metrics = 4;
+}
+
+message CommandRequest {
+    string device_id = 1;
+    string command = 2;
+    bytes payload = 3;
+}
+
+service GatewayService {
+    rpc SendCommand(CommandRequest) returns (CommandResponse);
+    rpc GetDeviceStatus(DeviceID) returns (DeviceStatus);
+}
