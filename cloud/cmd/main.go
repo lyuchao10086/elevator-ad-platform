@@ -4,7 +4,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/lyuchao10086/elevator-ad-platform/cloud/internal/gateway"
+	"elevator_project/internal/gateway"
 )
 
 func main() {
