@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -179,4 +180,21 @@ func (h *Handler) handleSnapshot(deviceID string, payload json.RawMessage) {
 		return
 	}
 	resp.Body.Close()
+}
+
+// GetStats 供仪表盘调用，获取当前在线统计
+func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
+	// 1. 从 Redis 模糊查询所有在线 Key
+	// 注意：ctx 需要你在文件开头定义 var ctx = context.Background()
+	keys, _ := h.Manager.rdb.Keys(ctx, "device:online:*").Result()
+
+	// 2. 构造返回数据
+	stats := map[string]interface{}{
+		"online_count": len(keys),
+		"devices":      keys,
+		"server_time":  time.Now().Format("15:04:05"),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
 }

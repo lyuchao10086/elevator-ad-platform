@@ -1,18 +1,34 @@
-### 2. 通信层：高性能接入网关 (Go) - 功能进度表
+# 2. 通信层：高性能接入网关 (Go) - 功能进度表
 
 需要安装Python依赖：pip install websocket-client
 
-# 1. 在 cloud 目录下初始化
+## 1. 在 cloud 目录下初始化
 go mod init elevator_project
 
-# 2. 安装 Redis 驱动
+## 2. 安装 Redis 驱动
 go get github.com/redis/go-redis/v9
 
-# 3. 安装 WebSocket 驱动
+## 3. 安装 WebSocket 驱动
 go get github.com/gorilla/websocket
 
-# 4. 自动整理（这一步会扫描你的代码并确认依赖）
+## 4. 自动整理（这一步会扫描你的代码并确认依赖）
 go mod tidy
+
+## 5. 测试
+* 启动redis-server.exe
+* 在 redis-cli 中备案 手动存入一个测试 Token：
+设置设备 ELEVATOR_001 的合法 token 为 secret123
+
+```solidity
+#启动redis-cli.exe
+set auth:ELEVATOR_001 secret123
+```
+
+* 运行main.go
+* 运行python test_device.py
+* 打开浏览器访问http://127.0.0.1:8080/dashboard
+
+## 6. 进度
 
 #### **A. 连接管理 (Connection Manager)**
 
