@@ -198,3 +198,21 @@ func (m *DeviceManager) notifyPythonStatus(deviceID string, status string) {
 		defer resp.Body.Close()
 	}()
 }
+
+// CheckAuth 校验设备身份
+func (m *DeviceManager) CheckAuth(deviceID, token string) bool {
+	if deviceID == "" || token == "" {
+		return false
+	}
+
+	// 方案：去 Redis 查找 key 为 "auth:ID"，看 value 是不是对应的 token
+	// 这样 Python 后端只需要把合法的 token 塞进 Redis，网关就能识别
+	savedToken, err := m.rdb.Get(ctx, "auth:"+deviceID).Result()
+	if err != nil {
+		// 如果 Redis 里没有这个 key，说明没备案，不予通过
+		log.Printf("[Auth] 设备 %s 鉴权失败: 未备案", deviceID)
+		return false
+	}
+
+	return savedToken == token
+}

@@ -38,16 +38,24 @@ type DeviceMessage struct {
 // 2. 面向电梯端的 WebSocket 接口
 // 对应文档：func HandleHandshake(conn Connection)
 func (h *Handler) HandleWebsocket(w http.ResponseWriter, r *http.Request) {
+	// 1. 获取参数
 	deviceID := r.URL.Query().Get("device_id")
-	token := r.URL.Query().Get("token") // 增加鉴权参数
+	token := r.URL.Query().Get("token")
 
-	// 逻辑：验证 Token 合法性 (这里简写)
-	if token == "" {
-		http.Error(w, "Unauthorized", 401)
+	// 2. 调用我们刚才写在 Manager 里的鉴权逻辑
+	if !h.Manager.CheckAuth(deviceID, token) {
+		log.Printf("[鉴权] 拒绝非法连接: ID=%s, Token=%s", deviceID, token)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized) // 返回 401
 		return
 	}
 
-	conn, _ := h.upgrader.Upgrade(w, r, nil)
+	// 3. 鉴权通过后的逻辑 (之前的代码保持不变)
+	conn, err := h.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Print("upgrade:", err)
+		return
+	}
+
 	h.Manager.Register(deviceID, conn)
 
 	// 进入消息路由循环

@@ -45,8 +45,8 @@ def on_open(ws):
     threading.Thread(target=run).start()
 
 if __name__ == "__main__":
-    # 加上 &token=任意值 
-    ws_url = "ws://127.0.0.1:8080/ws?device_id=ELEVATOR_001&token=test_token_123"
+    # test_device.py
+    ws_url = "ws://127.0.0.1:8080/ws?device_id=ELEVATOR_001&token=secret123"
     
     ws = websocket.WebSocketApp(ws_url,
                               on_open=on_open,
