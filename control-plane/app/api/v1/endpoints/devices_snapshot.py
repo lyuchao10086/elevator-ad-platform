@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import base64
 
-from app.services.device_service import send_remote_command, request_device_snapshot, receive_snapshot_callback
+from app.services.device_snapshot_service import send_remote_command, request_device_snapshot, receive_snapshot_callback
 
 router = APIRouter()
 
