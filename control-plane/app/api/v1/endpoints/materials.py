@@ -27,7 +27,7 @@ async def upload_material(
         material_id = f"mat_{uuid.uuid4().hex[:8]}"
 
         safe_name = Path(file.filename).name # 防止带路径的filename
-        save_path = MATERIAL_DIR / f"{material_id}_{file.filename}"
+        save_path = MATERIAL_DIR / f"{material_id}_{safe_name}"
         save_path.write_bytes(content)
         
         created_at = datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
@@ -54,7 +54,7 @@ async def upload_material(
     except Exception as e:
         raise HTTPException(status_code = 500,detail =str(e))
 
-@router.get("", response_model=MaterialListResponse)
+@router.get("/", response_model=MaterialListResponse)
 def list_all_materials(offset: int = 0, limit: int = 50):
     items = list_materials(offset=offset, limit=limit)
     return {"total": len(items), "items": items}
