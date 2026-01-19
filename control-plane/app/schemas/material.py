@@ -8,7 +8,7 @@ class MaterialMeta(BaseModel):
     size_bytes: int
     status: str
     created_at: str
-    extra: Optional[Dict[str,Any]]
+    extra: Optional[Dict[str,Any]] = None
 
 class MaterialUploadResponse(BaseModel):
     material_id: str
