@@ -1,9 +1,16 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Dict,Any,List,Optional
+
+class MaterialMeta(BaseModel):
+    material_id: str
 
 class MaterialUploadResponse(BaseModel):
     material_id: str
     filename: str
     md5: str
-    status: str  # PENDING / READY / FAILED
-    metadata: Optional[str] = None
+    status: str = "uploaded" # uploaded / transcoding / done / failed 
+    extra: Optional[Dict[str,Any]] = None
+
+class MaterialListResponse(BaseModel):
+    total: int
+    items: List[MaterialMeta]
