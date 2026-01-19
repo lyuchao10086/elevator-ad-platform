@@ -361,3 +361,7 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# runtime uploads / material index
+data/materials/
+!data/materials/.gitkeep
