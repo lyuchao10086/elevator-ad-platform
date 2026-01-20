@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"log" // 用于发送 HTTP 请求
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -156,4 +157,56 @@ func (m *DeviceManager) notifyPythonStatus(deviceID string, status string) {
 		defer resp.Body.Close()
 		log.Printf("[Webhook] 已成功通知 Python 端: 设备 %s 状态变更为 %s", deviceID, status)
 	}()
+}
+
+// 通知python业务中心截图已生成
+func (h *Handler) notifyPython(deviceID, reqID, snapshotURL string) {
+	callback := os.Getenv("CONTROL_PLANE_SNAPSHOT_CALLBACK")
+	if callback == "" {
+		callback = "http://127.0.0.1:5000/api/v1/devices/snapshot/callback"
+	}
+
+	body := map[string]string{
+		"device_id":    deviceID,
+		"req_id":       reqID,
+		"snapshot_url": snapshotURL,
+	}
+
+	data, err := json.Marshal(body)
+	if err != nil {
+		log.Printf("[snapshot][callback] JSON 序列化失败: %v", err)
+		return
+	}
+
+	req, err := http.NewRequest("POST", callback, bytes.NewReader(data))
+	if err != nil {
+		log.Printf("[snapshot][callback] 创建请求失败: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[snapshot][callback] 回调 Python 失败: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf(
+			"[snapshot][callback] Python 返回非 200: %d",
+			resp.StatusCode,
+		)
+		return
+	}
+
+	log.Printf(
+		"[snapshot][callback] 回调成功 device=%s req=%s",
+		deviceID,
+		reqID,
+	)
 }

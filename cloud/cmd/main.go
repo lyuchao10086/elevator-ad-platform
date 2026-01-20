@@ -9,7 +9,11 @@ import (
 
 func main() {
 	mgr := gateway.NewDeviceManager()
-	handler := gateway.NewHandler(mgr)
+
+	// ✅ 在程序启动时初始化 OSS
+	bucket := gateway.InitOSSBucket()
+
+	handler := gateway.NewHandler(mgr, bucket)
 
 	// --- 接口清单 ---
 	// 1. 南向接口：给电梯连接用的
