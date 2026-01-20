@@ -52,7 +52,8 @@ set auth:ELEVATOR_001 secret123
 * **`func DispatchMessage(msg []byte)`：【已完成】**
 * 实现了 `DispatchMessage` 函数，利用 `conn.ReadJSON` 解析端侧发来的包。
 * **路由逻辑**：代码中已经通过 `switch msg.Type` 分发了“日志（log）”和“截图（snapshot）”的处理函数。
-* **功能填充**：目前的 `handleLogReport` 和 `handleSnapshot` 还是打印日志（Print），尚未真正接入 Kafka、数据库或 OSS。
+* **功能填充**：目前的 `handleLogReport` 还是打印日志（Print），尚未真正接入 Kafka、数据库或 OSS。
+                `handleSnapshot`能够上传OSS生成url
 
 * **`func PushCommand(deviceID string, cmd Command)`：【已完成】**
 * 实现了 `HandleCommand` 接口（对应 `/api/send`），供 Python 后端通过 HTTP 调用。
@@ -108,6 +109,9 @@ set auth:ELEVATOR_001 secret123
 -  **南向接口**：`/ws` - WebSocket长连接，供设备连接
 -  **北向接口**：`/api/send` - HTTP RESTful接口，供Python下发指令
 
+-  **GO网关回调**
+  1)'/api/device/status' - GO网关通知python后端设备在线/掉线
+  2)'http://127.0.0.1:5000/api/v1/devices/snapshot/callback' - GO网关通知python后端设备截图生成
 # 二、业务功能实现
 
 ## 1. 设备状态管理
