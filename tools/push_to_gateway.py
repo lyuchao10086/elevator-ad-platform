@@ -55,13 +55,58 @@ def device_status_update():
 
     print(f"[Python] 设备状态变更: {device_id} -> {status} at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(event_time))}")
     return jsonify({"code": 0, "message": "ok"})
+#回调接口（GO回调截图完成）
+@app.route("/api/v1/devices/snapshot/callback", methods=["POST"])
+def snapshot_callback():
+    data = request.get_json()
+
+    device_id = data.get("device_id")
+    req_id = data.get("req_id")
+    snapshot_url = data.get("snapshot_url")
+
+    print(
+        f"[Python] 收到截图回调 "
+        f"device={device_id}, req={req_id}, url={snapshot_url}"
+    )
+
+    return jsonify({"code": 0, "message": "ok"}), 200
+
+# 监听设备在线/掉线线程
+def run_flask():
+    print("[Python] 后端启动，监听设备状态变化...")
+    app.run(host="0.0.0.0", port=5000)
+
+#向设备发起截图请求进程
+def business_logic():
+    time.sleep(5)  # 等待设备上线
+    print("[Python] 向设备发送截图请求")
+    push_command_to_elevator(
+        device_id="ELEVATOR_SH_001",
+        command_type="CAPTURE_SCREEN",
+        extra_data={
+            "req_id": "req-001"
+        }
+    )
+
+
 if __name__ == "__main__":
     # 测试案例 1：让 001 号电梯重启
     #push_command_to_elevator("ELEVATOR_SH_001", "REBOOT", "force=true")
     
     # 启动 Flask 后端 监听设备在线/掉线
-    print("[Python] 后端启动，监听设备状态变化...")
-    app.run(host="0.0.0.0", port=5000)
+    # print("[Python] 后端启动，监听设备状态变化...")
+    # app.run(host="0.0.0.0", port=5000)
 
     # 测试案例 2：让 002 号电梯更新视频列表
     # push_command_to_elevator("ELEVATOR_SH_002", "UPDATE_PLAYLIST", "url=http://cdn.com/v2.json")
+    
+    # 测试案例 3： 让 001 号电梯设备截图
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+
+    business_thread = threading.Thread(target=business_logic, daemon=True)
+    business_thread.start()
+
+    # 防止主线程退出
+    while True:
+        time.sleep(1)

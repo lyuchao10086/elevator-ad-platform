@@ -3,6 +3,7 @@ import json
 import time
 import threading
 import random
+import base64
 
 # 配置信息
 GATEWAY_URL = "ws://127.0.0.1:8080/ws"
@@ -21,6 +22,30 @@ def simulate_elevator(device_id):
         # 如果收到 pong，说明心跳成功
         if data.get("type") == "pong":
             pass # 可以在这里更新本地连接活跃时间
+        # 如果收到 capture，上传截图（已固定图片作为测试）
+        if data.get("type") == "command" and data.get("payload") == "CAPTURE_SCREEN":
+            req_id = data.get("data", {}).get("req_id", "unknown")
+
+            # 读取本地图片，模拟“截屏”
+            with open("test_snapshot.jpg", "rb") as f:
+                img_bytes = f.read()
+
+            img_b64 = base64.b64encode(img_bytes).decode("utf-8")
+
+            snapshot_msg = {
+                "type": "snapshot_response",
+                "device_id": device_id,
+                "payload": {
+                    "format": "jpeg",
+                    "resolution": "640x360",
+                    "data": img_b64,
+                    "req_id": req_id,
+                    "ts": int(time.time())
+                }
+            }
+
+            ws.send(json.dumps(snapshot_msg))
+            print(f"[{device_id}] 已上传截图")
 
     def on_error(ws, error):
         print(f"[{device_id}] 错误: {error}")

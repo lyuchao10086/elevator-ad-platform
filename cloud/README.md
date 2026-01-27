@@ -1,6 +1,34 @@
-### 2. 通信层：高性能接入网关 (Go) - 功能进度表
+# 2. 通信层：高性能接入网关 (Go) - 功能进度表
 
 需要安装Python依赖：pip install websocket-client
+
+## 1. 在 cloud 目录下初始化
+go mod init elevator_project
+
+## 2. 安装 Redis 驱动
+go get github.com/redis/go-redis/v9
+
+## 3. 安装 WebSocket 驱动
+go get github.com/gorilla/websocket
+
+## 4. 自动整理（这一步会扫描你的代码并确认依赖）
+go mod tidy
+
+## 5. 测试
+* 启动redis-server.exe
+* 在 redis-cli 中备案 手动存入一个测试 Token：
+设置设备 ELEVATOR_001 的合法 token 为 secret123
+
+```solidity
+#启动redis-cli.exe
+set auth:ELEVATOR_001 secret123
+```
+
+* 运行main.go
+* 运行python test_device.py
+* 打开浏览器访问http://127.0.0.1:8080/dashboard
+
+## 6. 进度
 
 #### **A. 连接管理 (Connection Manager)**
 
@@ -24,7 +52,8 @@
 * **`func DispatchMessage(msg []byte)`：【已完成】**
 * 实现了 `DispatchMessage` 函数，利用 `conn.ReadJSON` 解析端侧发来的包。
 * **路由逻辑**：代码中已经通过 `switch msg.Type` 分发了“日志（log）”和“截图（snapshot）”的处理函数。
-* **功能填充**：目前的 `handleLogReport` 和 `handleSnapshot` 还是打印日志（Print），尚未真正接入 Kafka、数据库或 OSS。
+* **功能填充**：目前的 `handleLogReport` 还是打印日志（Print），尚未真正接入 Kafka、数据库或 OSS。
+                `handleSnapshot`能够上传OSS生成url
 
 * **`func PushCommand(deviceID string, cmd Command)`：【已完成】**
 * 实现了 `HandleCommand` 接口（对应 `/api/send`），供 Python 后端通过 HTTP 调用。
@@ -80,6 +109,9 @@
 -  **南向接口**：`/ws` - WebSocket长连接，供设备连接
 -  **北向接口**：`/api/send` - HTTP RESTful接口，供Python下发指令
 
+-  **GO网关回调**
+  1)'/api/device/status' - GO网关通知python后端设备在线/掉线
+  2)'http://127.0.0.1:5000/api/v1/devices/snapshot/callback' - GO网关通知python后端设备截图生成
 # 二、业务功能实现
 
 ## 1. 设备状态管理
