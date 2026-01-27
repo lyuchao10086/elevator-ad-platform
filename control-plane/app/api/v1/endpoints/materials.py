@@ -3,6 +3,8 @@ from app.schemas.material import MaterialUploadResponse
 from app.services.material_service import upsert_material
 from app.services.material_service import list_materials,get_material
 from app.schemas.material import MaterialListResponse,MaterialMeta
+from fastapi.responses import FileResponse
+from app.services.material_service import get_material_file_path,get_material
 
 import hashlib
 import uuid
@@ -65,3 +67,22 @@ def get_one_material(material_id: str):
     if not item:
         raise HTTPException(status_code=404, detail="material not found")
     return item
+
+@router.get("/{material_id}/file")
+def download_material_file(material_id: str):
+    item = get_material(material_id)
+    if not item:
+        raise HTTPException(status_code=404,detail="material not found")
+
+    p = get_material_file_path(material_id)
+    if not p:
+        raise HTTPException(status_code=404,detail="material file not found")
+        
+    # 下载时展示原始文件名(索引中已保存 filename)
+    download_name = item.get("filename") or p.name
+
+    return FileResponse(
+        path=str(p),
+        filename=download_name,
+        media_type="application/octet_stream",
+    )

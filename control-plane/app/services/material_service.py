@@ -69,3 +69,27 @@ def list_materials(offset: int = 0, limit: int = 50) -> List[Dict[str, Any]]:
         data = _read_index()
         items = data.get("items", [])
         return items[offset : offset + limit]
+
+def get_material_file_path(material_id: str) -> Optional[Path]:
+    item = get_material(material_id)
+    if not item:
+        return None
+
+    extra = item.get("extra") or {}
+    path_str = extra.get("path")
+    if not path_str:
+        return None
+    
+    p = Path(path_str)
+
+    # 安全校验：必须在MATERIAL_DIR 目录里(防止 ../ 任意文件下载)
+    try:
+        if MATERIAL_DIR.resolve() not in p.resolve().parents and p.resolve() != MATERIAL_DIR.resolve:
+            return None
+    except Exception:
+        return None
+    
+    if not p.exists() or not p.is_file():
+        return None
+    
+    return p
