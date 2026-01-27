@@ -1,26 +1,88 @@
-from fastapi import APIRouter, UploadFile, File, Form
+from fastapi import APIRouter, UploadFile, File, HTTPException 
 from app.schemas.material import MaterialUploadResponse
+from app.services.material_service import upsert_material
+from app.services.material_service import list_materials,get_material
+from app.schemas.material import MaterialListResponse,MaterialMeta
+from fastapi.responses import FileResponse
+from app.services.material_service import get_material_file_path,get_material
 
 import hashlib
 import uuid
+from pathlib import Path
+from datetime import datetime, timezone
 
 router = APIRouter()
 
-# PR-1：先不做转码，只做“收文件 + 算 md5 + 返回状态”
+# PR-2：先落到本地目录，后面再换对象存储/转码队列” 
+MATERIAL_DIR = Path("data/materials")
+MATERIAL_DIR.mkdir(parents=True,exist_ok=True)
+
+
 @router.post("/upload", response_model=MaterialUploadResponse)
 async def upload_material(
-    file: UploadFile = File(...),
-    metadata: str | None = Form(default=None),
+    file: UploadFile = File(...)
 ):
-    content = await file.read()
-    md5 = hashlib.md5(content).hexdigest()
-    material_id = f"mat_{uuid.uuid4().hex[:8]}"
+    try:
+        content = await file.read()
+        size_bytes = len(content)
+        md5 = hashlib.md5(content).hexdigest()
+        material_id = f"mat_{uuid.uuid4().hex[:8]}"
 
-    # 这里 PR-1 不落盘也行；要落盘的话下次再加 storage/ 目录
-    return MaterialUploadResponse(
-        material_id=material_id,
-        filename=file.filename,
-        md5=md5,
-        status="PENDING",   # 后续接 Celery 转码后变 READY
-        metadata=metadata,
+        safe_name = Path(file.filename).name # 防止带路径的filename
+        save_path = MATERIAL_DIR / f"{material_id}_{safe_name}"
+        save_path.write_bytes(content)
+        
+        created_at = datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
+
+        #写索引（最小字段）
+        upsert_material({
+           "material_id": material_id,
+           "filename": file.filename,
+           "md5": md5,
+           "size_bytes": size_bytes,
+           "status": "uploaded",
+           "created_at": created_at,
+           "extra": {"path": str(save_path)}
+        })
+
+        return MaterialUploadResponse(
+            material_id=material_id,
+            filename=file.filename,
+            md5=md5,
+            status="uploaded",   
+            extra= {"path":str(save_path),
+                    "size_bytes": size_bytes},
+        )
+    except Exception as e:
+        raise HTTPException(status_code = 500,detail =str(e))
+
+@router.get("/", response_model=MaterialListResponse)
+def list_all_materials(offset: int = 0, limit: int = 50):
+    items = list_materials(offset=offset, limit=limit)
+    return {"total": len(items), "items": items}
+
+@router.get("/{material_id}", response_model=MaterialMeta)
+def get_one_material(material_id: str):
+    item = get_material(material_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="material not found")
+    return item
+
+@router.get("/{material_id}/file")
+def download_material_file(material_id: str):
+    item = get_material(material_id)
+    if not item:
+        raise HTTPException(status_code=404,detail="material not found")
+
+    p = get_material_file_path(material_id)
+    if not p:
+        raise HTTPException(status_code=404,detail="material file not found")
+        
+    # 下载时展示原始文件名(索引中已保存 filename)
+    download_name = item.get("filename") or p.name
+
+    return FileResponse(
+        path=str(p),
+        filename=download_name,
+        media_type="application/octet_stream",
     )
