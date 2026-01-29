@@ -1,6 +1,14 @@
 # 2. 通信层：高性能接入网关 (Go) - 功能进度表
 
-需要安装Python依赖：pip install websocket-client
+需要安装Python依赖：
+
+pip install websocket-client
+
+pip install uvicorn fastapi redis requests pydantic
+
+pip install pydantic-settings
+
+pip install python-multipart
 
 ## 1. 在 cloud 目录下初始化
 go mod init elevator_project
@@ -16,17 +24,44 @@ go mod tidy
 
 ## 5. 测试
 * 启动redis-server.exe
-* 在 redis-cli 中备案 手动存入一个测试 Token：
-设置设备 ELEVATOR_001 的合法 token 为 secret123
-
-```solidity
-#启动redis-cli.exe
-set auth:ELEVATOR_001 secret123
-```
-
 * 运行main.go
 * 运行python test_device.py
-* 打开浏览器访问http://127.0.0.1:8080/dashboard
+
+### 开始“三步走”联调测试
+1. 模拟注册（领钥匙）
+打开 Postman，点击 New Request：
+
+方法：选择 POST
+
+地址：http://127.0.0.1:8000/api/v1/devices/register
+
+Body：选择 raw，右侧选 JSON，填入：
+
+JSON
+```solidity
+{"location": "上海中心01号"}
+```
+点击 Send：你会得到一个 device_id（比如 dev_12345）和一个 token。记下它们。
+
+2. 模拟电梯上线（进门）
+我们需要让电梯连上 Go 网关。
+
+修改你之前写的 Python 模拟脚本 mock_device.py（或者用任何 WebSocket 测试工具）。
+
+把里面的连接地址改为： ws://127.0.0.1:8080/ws?device_id=刚才拿到的ID&token=刚才拿到的Token
+
+运行这个脚本。
+
+看 Go 控制台：如果出现 [Manager] Device Registered: dev_12345，恭喜你，第一座桥修通了！
+
+3. 远程截图测试（发令）
+在云端让电梯拍照并传回来。 在 Postman 新开一个请求：
+
+方法：选择 GET
+
+地址：http://127.0.0.1:8000/api/v1/devices/remote/刚才拿到的ID/snapshot
+
+点击 Send。
 
 ## 6. 进度
 
