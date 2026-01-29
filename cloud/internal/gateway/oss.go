@@ -14,7 +14,8 @@ func InitOSSBucket() *oss.Bucket {
 	bucketName := os.Getenv("OSS_BUCKET")
 
 	if endpoint == "" || accessKey == "" || secretKey == "" || bucketName == "" {
-		log.Fatal("[OSS] 环境变量未配置完整")
+		log.Println("[OSS] 警告：未检测到云存储配置，截图功能将暂时失效，但不影响其他功能运行。")
+		return nil
 	}
 
 	client, err := oss.New(endpoint, accessKey, secretKey)

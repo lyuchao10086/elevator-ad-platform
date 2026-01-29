@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import base64
@@ -21,28 +22,31 @@ def post_command(req: CommandRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 请求设备截图
+# 修改 1: 获取截图接口，直接返回 URL
 @router.get("/{device_id}/snapshot")
 async def get_snapshot(device_id: str):
     try:
-        img = await request_device_snapshot(device_id)
-        b64 = base64.b64encode(img).decode()
-        return {"device_id": device_id, "snapshot_b64": b64}
+        # 这里返回的不再是 bytes，而是 url 字符串
+        snapshot_url = await request_device_snapshot(device_id)
+        return {"device_id": device_id, "snapshot_url": snapshot_url}
     except TimeoutError as e:
         raise HTTPException(status_code=504, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+    
 # 截图回调数据模型
+# 修改 2: 回调数据模型，适配 Go 发来的 JSON
 class SnapshotCallback(BaseModel):
     device_id: str
-    snapshot_b64: str
+    req_id: Optional[str] = None         # Go 发来的请求 ID
+    snapshot_url: str   # Go 发来的 OSS 地址
 
 # 设备截图回调接口
 @router.post("/snapshot/callback")
 def snapshot_callback(body: SnapshotCallback):
     try:
-        path = receive_snapshot_callback(body.device_id, body.snapshot_b64)
-        return {"status": "ok", "path": path}
+        # 传递 url 而不是 base64
+        path = receive_snapshot_callback(body.device_id, body.snapshot_url)
+        return {"status": "ok", "url": path}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

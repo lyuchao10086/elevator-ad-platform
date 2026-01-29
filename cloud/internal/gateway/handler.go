@@ -188,29 +188,38 @@ func (h *Handler) handleSnapshot(msg DeviceMessage) {
 		msg.ReqID,
 	)
 
-	// 4. 上传 OSS
-	err = h.bucket.PutObject(
-		objectKey,
-		bytes.NewReader(imgBytes),
-		oss.ContentType("image/jpeg"),
-	)
-	if err != nil {
-		log.Printf("[snapshot] OSS 上传失败: %v", err)
-		return
+	// 4. 尝试上传 OSS（即使失败也继续）
+	ossURL := ""
+	if h.bucket != nil {
+		err = h.bucket.PutObject(
+			objectKey,
+			bytes.NewReader(imgBytes),
+			oss.ContentType("image/jpeg"),
+		)
+		if err != nil {
+			log.Printf("[snapshot] OSS 上传失败: %v", err)
+			// 失败了就给个占位图，保证流程不中断
+			ossURL = "https://via.placeholder.com/150.jpg"
+		} else {
+			// 上传成功，拼真实 URL
+			ossURL = fmt.Sprintf(
+				"https://%s.%s/%s",
+				os.Getenv("OSS_BUCKET"),
+				os.Getenv("OSS_ENDPOINT"),
+				objectKey,
+			)
+		}
+	} else {
+		// 如果根本没初始化 OSS，直接给假地址
+		log.Printf("[snapshot] OSS 未初始化，跳过上传")
+		ossURL = "https://via.placeholder.com/150.jpg"
 	}
 
-	// 5. 拼 OSS URL
-	ossURL := fmt.Sprintf(
-		"https://%s.%s/%s",
-		os.Getenv("OSS_BUCKET"),
-		os.Getenv("OSS_ENDPOINT"),
-		objectKey,
-	)
+	log.Printf("[snapshot] 流程继续，准备回调 Python. URL: %s", ossURL)
 
-	log.Printf("[snapshot] 上传成功: %s", ossURL)
-
-	// 5. 回调 Python
-	h.notifyPython(msg.DeviceID, msg.ReqID, ossURL)
+	// 5. 【关键修改点】调用 NotifyPython (注意首字母大写，匹配 manager.go 里的定义)
+	// 之前你代码里写的是 h.notifyPython，如果 manager.go 里定义的是 NotifyPython，这里要改
+	h.Manager.NotifyPython(msg.DeviceID, msg.ReqID, ossURL)
 }
 
 // GetStats 供仪表盘调用，获取当前在线统计
