@@ -10,6 +10,11 @@ pip install pydantic-settings
 
 pip install python-multipart
 
+需要安装的GO依赖：
+go get github.com/aliyun/aliyun-oss-go-sdk/oss
+
+go get github.com/joho/godotenv
+
 ## 1. 在 cloud 目录下初始化
 go mod init elevator_project
 
@@ -146,7 +151,7 @@ JSON
 
 -  **GO网关回调**
   1)'/api/device/status' - GO网关通知python后端设备在线/掉线
-  2)'http://127.0.0.1:5000/api/v1/devices/snapshot/callback' - GO网关通知python后端设备截图生成
+  2)'http://127.0.0.1:5000/api/v1/devices/remote/snapshot/callback' - GO网关通知python后端设备截图生成
 # 二、业务功能实现
 
 ## 1. 设备状态管理

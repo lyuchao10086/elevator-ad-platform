@@ -6,6 +6,9 @@
       <el-table-column prop="name" label="名称"/>
       <el-table-column prop="status" label="状态" width="120"/>
       <el-table-column prop="firmware_version" label="固件版本" width="140"/>
+      <el-table-column prop="city" label="城市" width="120"/>
+      <el-table-column prop="lon" label="经度" width="120"/>
+      <el-table-column prop="lat" label="纬度" width="120"/>
       <el-table-column label="操作" width="180">
         <template #default="{ row }">
           <el-button type="primary" size="small" @click="openDetail(row)">详情</el-button>
@@ -24,7 +27,14 @@ export default {
   methods:{
     async fetch(){
       const params = { q:this.q, page:this.page, page_size:this.pageSize }
-      const r = await api.get('/devices', { params })
+      const r = await api.get('/devices/', { params })
+      console.log('设备信息 ->', r.data)
+      if(r.data?.error){
+        this.$message.error('设备查询错误: ' + r.data.error)
+        this.devices = []
+        this.total = 0
+        return
+      }
       this.devices = r.data?.items || []
       this.total = r.data?.total || 0
     },

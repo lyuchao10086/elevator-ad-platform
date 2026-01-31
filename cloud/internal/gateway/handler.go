@@ -8,9 +8,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -164,6 +166,34 @@ func (h *Handler) handleLogReport(deviceID string, payload json.RawMessage) {
 	log.Printf("[日志上报] 设备 ID: %s, 内容: %s", deviceID, content)
 }
 
+// Python / Postman 调用：请求设备截图
+func (h *Handler) HandleRemoteSnapshot(w http.ResponseWriter, r *http.Request) {
+	deviceID := strings.TrimPrefix(r.URL.Path, "/api/v1/devices/remote/")
+	deviceID = strings.TrimSuffix(deviceID, "/snapshot")
+
+	conn, ok := h.Manager.GetConnection(deviceID)
+	if !ok {
+		http.Error(w, "Device Offline", 404)
+		return
+	}
+
+	reqID := uuid.New().String()
+
+	// 给设备发截图请求
+	conn.WriteJSON(map[string]interface{}{
+		"type":   "snapshot_request",
+		"req_id": reqID,
+		"payload": map[string]interface{}{
+			"format":     "jpg",
+			"quality":    80,
+			"resolution": "1920x1080",
+		},
+	})
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"req_id":"` + reqID + `"}`))
+}
+
 // handleSnapshot 处理电梯端上报的截图凭证
 func (h *Handler) handleSnapshot(msg DeviceMessage) {
 	// 1.解析payload
@@ -218,7 +248,6 @@ func (h *Handler) handleSnapshot(msg DeviceMessage) {
 	log.Printf("[snapshot] 流程继续，准备回调 Python. URL: %s", ossURL)
 
 	// 5. 【关键修改点】调用 NotifyPython (注意首字母大写，匹配 manager.go 里的定义)
-	// 之前你代码里写的是 h.notifyPython，如果 manager.go 里定义的是 NotifyPython，这里要改
 	h.Manager.NotifyPython(msg.DeviceID, msg.ReqID, ossURL)
 }
 
@@ -226,7 +255,14 @@ func (h *Handler) handleSnapshot(msg DeviceMessage) {
 func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 	// 1. 从 Redis 模糊查询所有在线 Key
 	// 注意：ctx 需要你在文件开头定义 var ctx = context.Background()
-	keys, _ := h.Manager.rdb.Keys(ctx, "device:online:*").Result()
+	var keys []string
+	if h.Manager.rdb != nil {
+		k, _ := h.Manager.rdb.Keys(ctx, "device:online:*").Result()
+		keys = k
+	} else {
+		log.Printf("[GetStats] Redis 未连接，返回空在线列表")
+		keys = []string{}
+	}
 
 	// 2. 构造返回数据
 	stats := map[string]interface{}{

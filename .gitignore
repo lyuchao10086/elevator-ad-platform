@@ -370,3 +370,4 @@ data/materials/
 control-plane/data/materials/*
 !control-plane/data/materials/index.json
 
+cloud/.env

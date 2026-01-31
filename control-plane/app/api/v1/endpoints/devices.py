@@ -1,7 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from app.schemas.device import DeviceRegisterRequest, DeviceRegisterResponse
-
 import uuid
+from app.services import db_service
 import redis # 1. 引入 Redis
 from app.core.config import settings # 假设你配置都在这里
 
@@ -15,7 +15,8 @@ rdb = redis.Redis(
     decode_responses=True
 )
 
-# PR-1：先内存存一下，后面再换 DB
+
+# PR-1：注册接口仍使用内存暂存
 _DEVICE_STORE = {}  # device_id -> token
 
 # 连接 Redis (确保和 Go 用的是同一个 Redis)
@@ -46,6 +47,23 @@ def register_device(payload: DeviceRegisterRequest):
         token=token,
         location=payload.location,
     )
+
+@router.get("/", summary="List devices")
+def list_devices(q: str = None, page: int = 1, page_size: int = 20):
+    print("q是",q) #debug
+    try:
+        # normalize pagination
+        if page < 1:
+            page = 1
+        if page_size < 1 or page_size > 1000:
+            page_size = 20
+        offset = (page - 1) * page_size
+        items = db_service.list_devices(limit=page_size, offset=offset, q=q)
+        total = db_service.count_devices(q=q)
+        return {"total": total, "items": items}
+    except Exception as e:
+        # return an empty list with error message to aid frontend debugging
+        return {"total": 0, "items": [], "error": str(e)}
 
 # ... 你原有的代码 (rdb, register_device 等) ...
 

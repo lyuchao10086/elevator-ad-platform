@@ -42,7 +42,7 @@ func (m *DeviceManager) NotifyPython(deviceID, reqID, snapshotURL string) {
 	callback := os.Getenv("CONTROL_PLANE_SNAPSHOT_CALLBACK")
 	if callback == "" {
 		// 确保这里的路径和 Python 的路由对齐
-		callback = "http://127.0.0.1:8000/api/v1/devices/remote/snapshot/callback"
+		callback = "http://127.0.0.1:5000/api/v1/devices/remote/snapshot/callback"
 	}
 
 	body := map[string]string{
@@ -208,7 +208,7 @@ func (m *DeviceManager) GetConnection(deviceID string) (*websocket.Conn, bool) {
 // 核心函数：通知 Python 业务中心设备状态变更
 func (m *DeviceManager) notifyPythonStatus(deviceID string, status string) {
 
-	pythonWebhookURL := "http://127.0.0.1:8000/api/device/status"
+	pythonWebhookURL := "http://127.0.0.1:5000/api/device/status"
 	payload := map[string]interface{}{
 		"device_id":  deviceID,
 		"status":     status,
@@ -225,6 +225,13 @@ func (m *DeviceManager) notifyPythonStatus(deviceID string, status string) {
 			return
 		}
 		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			log.Printf("[Webhook] Python 返回非 200: %d", resp.StatusCode)
+			return
+		}
+
+		log.Printf("[Webhook] 状态回调成功 device=%s status=%s", deviceID, status)
 	}()
 }
 
@@ -233,9 +240,9 @@ func (h *Handler) notifyPython(deviceID, reqID, snapshotURL string) {
 	callback := os.Getenv("CONTROL_PLANE_SNAPSHOT_CALLBACK")
 	if callback == "" {
 		// callback = "http://127.0.0.1:5000/api/v1/devices/snapshot/callback"
-		callback = "http://127.0.0.1:8000/api/v1/devices/remote/snapshot/callback"
+		callback = "http://127.0.0.1:5000/api/v1/devices/remote/snapshot/callback"
 	}
-	// callback = "http://127.0.0.1:8000/api/v1/devices/remote/snapshot/callback"
+	// callback = "http://127.0.0.1:5000/api/v1/devices/remote/snapshot/callback"
 	body := map[string]string{
 		"device_id":    deviceID,
 		"req_id":       reqID,

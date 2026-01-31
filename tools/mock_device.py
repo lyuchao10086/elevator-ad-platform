@@ -23,13 +23,14 @@ def simulate_elevator(device_id, token): # 增加 token 参数
             
         # 注意：这里判断指令类型要跟 Python 后端发的一致
         # 如果你后端发的是 SNAPSHOT，这里就改 SNAPSHOT
-        is_snapshot = data.get("payload") in ["SNAPSHOT", "CAPTURE_SCREEN"]
+    
         
-        if data.get("type") == "command" and is_snapshot:
+        if data.get("type") == "snapshot_request" :
             # 获取请求 ID
             req_id = data.get("req_id", "unknown") 
-
-            # 读取本地图片
+            payload = data.get("payload", {})
+            print(f"[{device_id}] 开始处理截图请求 req_id={req_id}, 参数={payload}")
+            # 读取本地图片(用一张固定图片做测试)
             try:
                 with open("test_snapshot.jpg", "rb") as f:
                     img_bytes = f.read()
