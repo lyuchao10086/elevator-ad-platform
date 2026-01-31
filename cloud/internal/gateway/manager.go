@@ -38,6 +38,34 @@ type DeviceManager struct {
 	rdb         *redis.Client // 新增：Redis 客户端句柄
 }
 
+func (m *DeviceManager) NotifyPython(deviceID, reqID, snapshotURL string) {
+	callback := os.Getenv("CONTROL_PLANE_SNAPSHOT_CALLBACK")
+	if callback == "" {
+		// 确保这里的路径和 Python 的路由对齐
+		callback = "http://127.0.0.1:8000/api/v1/devices/remote/snapshot/callback"
+	}
+
+	body := map[string]string{
+		"device_id":    deviceID,
+		"req_id":       reqID,
+		"snapshot_url": snapshotURL,
+	}
+
+	data, _ := json.Marshal(body)
+
+	// 启动协程发送，防止阻塞网关主流程
+	go func() {
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Post(callback, "application/json", bytes.NewReader(data))
+		if err != nil {
+			log.Printf("[snapshot][callback] 回调 Python 失败: %v", err)
+			return
+		}
+		defer resp.Body.Close()
+		log.Printf("[snapshot][callback] 回调成功 device=%s status=%d", deviceID, resp.StatusCode)
+	}()
+}
+
 // NewDeviceManager 创建一个空的管理器
 func NewDeviceManager() *DeviceManager {
 	// --- 新增：初始化 Redis 连接 ---
@@ -179,7 +207,8 @@ func (m *DeviceManager) GetConnection(deviceID string) (*websocket.Conn, bool) {
 
 // 核心函数：通知 Python 业务中心设备状态变更
 func (m *DeviceManager) notifyPythonStatus(deviceID string, status string) {
-	pythonWebhookURL := "http://127.0.0.1:5000/api/device/status"
+
+	pythonWebhookURL := "http://127.0.0.1:8000/api/device/status"
 	payload := map[string]interface{}{
 		"device_id":  deviceID,
 		"status":     status,
@@ -210,9 +239,10 @@ func (m *DeviceManager) notifyPythonStatus(deviceID string, status string) {
 func (h *Handler) notifyPython(deviceID, reqID, snapshotURL string) {
 	callback := os.Getenv("CONTROL_PLANE_SNAPSHOT_CALLBACK")
 	if callback == "" {
-		callback = "http://127.0.0.1:5000/api/v1/devices/snapshot/callback"
+		// callback = "http://127.0.0.1:5000/api/v1/devices/snapshot/callback"
+		callback = "http://127.0.0.1:8000/api/v1/devices/remote/snapshot/callback"
 	}
-
+	// callback = "http://127.0.0.1:8000/api/v1/devices/remote/snapshot/callback"
 	body := map[string]string{
 		"device_id":    deviceID,
 		"req_id":       reqID,

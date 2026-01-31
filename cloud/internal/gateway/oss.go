@@ -13,7 +13,7 @@ func InitOSSBucket() *oss.Bucket {
 	secretKey := os.Getenv("OSS_SECRET_KEY")
 	bucketName := os.Getenv("OSS_BUCKET")
 	if endpoint == "" || accessKey == "" || secretKey == "" || bucketName == "" {
-		log.Printf("[OSS] 环境变量未配置完整，OSS 上传将被禁用")
+		log.Println("[OSS] 警告：未检测到云存储配置，截图功能将暂时失效，但不影响其他功能运行。")
 		return nil
 	}
 

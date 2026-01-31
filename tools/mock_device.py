@@ -8,44 +8,49 @@ import base64
 # 配置信息
 GATEWAY_URL = "ws://127.0.0.1:8080/ws"
 
-def simulate_elevator(device_id):
+def simulate_elevator(device_id, token): # 增加 token 参数
     """模拟单台电梯终端的逻辑"""
     
-    # 根据文档 A.连接管理：建立连接并带上 device_id 参数
-    ws_url = f"{GATEWAY_URL}?device_id={device_id}&token=test_token_123"
+    # 动态拼接：使用传入的 ID 和 Token，不要硬编码
+    ws_url = f"{GATEWAY_URL}?device_id={device_id}&token={token}"
     
     def on_message(ws, message):
-        """处理来自 Go 网关的下行指令 (PushCommand)"""
         data = json.loads(message)
         print(f"[{device_id}] 收到服务器指令: {data}")
         
-        # 如果收到 pong，说明心跳成功
         if data.get("type") == "pong":
-            pass # 可以在这里更新本地连接活跃时间
-        # 如果收到 capture，上传截图（已固定图片作为测试）
-        if data.get("type") == "command" and data.get("payload") == "CAPTURE_SCREEN":
-            req_id = data.get("data", {}).get("req_id", "unknown")
+            pass
+            
+        # 注意：这里判断指令类型要跟 Python 后端发的一致
+        # 如果你后端发的是 SNAPSHOT，这里就改 SNAPSHOT
+        is_snapshot = data.get("payload") in ["SNAPSHOT", "CAPTURE_SCREEN"]
+        
+        if data.get("type") == "command" and is_snapshot:
+            # 获取请求 ID
+            req_id = data.get("req_id", "unknown") 
 
-            # 读取本地图片，模拟“截屏”
-            with open("test_snapshot.jpg", "rb") as f:
-                img_bytes = f.read()
-
-            img_b64 = base64.b64encode(img_bytes).decode("utf-8")
+            # 读取本地图片
+            try:
+                with open("test_snapshot.jpg", "rb") as f:
+                    img_bytes = f.read()
+                img_b64 = base64.b64encode(img_bytes).decode("utf-8")
+            except FileNotFoundError:
+                img_b64 = "BASE64_MOCK_DATA" # 没图片就发假数据测试
+                print(f"[{device_id}] 警告: 未找到 test_snapshot.jpg")
 
             snapshot_msg = {
                 "type": "snapshot_response",
-                "device_id": device_id,
+                "device_id": device_id, # 必须是当前连接的 ID
+                "req_id": req_id,       # 必须把 req_id 原样传回，否则 Python 认不出是谁的回复
+                "ts": int(time.time()),
                 "payload": {
                     "format": "jpeg",
-                    "resolution": "640x360",
-                    "data": img_b64,
-                    "req_id": req_id,
-                    "ts": int(time.time())
+                    "data": img_b64
                 }
             }
 
             ws.send(json.dumps(snapshot_msg))
-            print(f"[{device_id}] 已上传截图")
+            print(f"[{device_id}] 已上传截图回复")
 
     def on_error(ws, error):
         print(f"[{device_id}] 错误: {error}")
@@ -96,19 +101,21 @@ def simulate_elevator(device_id):
     ws.run_forever()
 
 if __name__ == "__main__":
-    # 定义要模拟的设备列表
-    # 在实际测试中，你可以把 range 改成 1000 来测试网关性能  
-    # 这里模拟3台设备
-    test_devices = [f"ELEVATOR_SH_00{i}" for i in range(1, 4)] 
+    # --- 关键：在这里填入 Postman /register 接口给你的信息 ---
+    # 你可以填多组，模拟多台真实注册过的设备
+    my_real_devices = [
+        {"id": "ELEVATOR_53D246", "token": "sk_15b3acb1b0b84b01be6c7085e1271837"},
+        # 如果有第二台，接着写：
+        # {"id": "dev_xyz789", "token": "tok_999999"}
+    ]
     
     threads = []
-    print(f"正在启动 {len(test_devices)} 台模拟设备...")
-
-    for dev_id in test_devices:
-        t = threading.Thread(target=simulate_elevator, args=(dev_id,))
+    for dev in my_real_devices:
+        # 把 ID 和 Token 都传进去
+        t = threading.Thread(target=simulate_elevator, args=(dev["id"], dev["token"]))
         t.start()
         threads.append(t)
-        time.sleep(0.1)  # 避免瞬间并发过高
+        time.sleep(0.1)
 
     for t in threads:
         t.join()
