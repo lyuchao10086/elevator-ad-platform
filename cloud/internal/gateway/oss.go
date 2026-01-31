@@ -12,19 +12,21 @@ func InitOSSBucket() *oss.Bucket {
 	accessKey := os.Getenv("OSS_ACCESS_KEY")
 	secretKey := os.Getenv("OSS_SECRET_KEY")
 	bucketName := os.Getenv("OSS_BUCKET")
-
 	if endpoint == "" || accessKey == "" || secretKey == "" || bucketName == "" {
-		log.Fatal("[OSS] 环境变量未配置完整")
+		log.Printf("[OSS] 环境变量未配置完整，OSS 上传将被禁用")
+		return nil
 	}
 
 	client, err := oss.New(endpoint, accessKey, secretKey)
 	if err != nil {
-		log.Fatalf("[OSS] 创建 client 失败: %v", err)
+		log.Printf("[OSS] 创建 client 失败，OSS 上传将被禁用: %v", err)
+		return nil
 	}
 
 	bucket, err := client.Bucket(bucketName)
 	if err != nil {
-		log.Fatalf("[OSS] 获取 bucket 失败: %v", err)
+		log.Printf("[OSS] 获取 bucket 失败，OSS 上传将被禁用: %v", err)
+		return nil
 	}
 
 	log.Printf("[OSS] Bucket 初始化成功: %s", bucketName)

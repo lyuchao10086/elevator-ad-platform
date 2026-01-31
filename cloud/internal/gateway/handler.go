@@ -188,19 +188,27 @@ func (h *Handler) handleSnapshot(msg DeviceMessage) {
 		msg.ReqID,
 	)
 
-	// 4. 上传 OSS
-	err = h.bucket.PutObject(
+	// 4. 上传 OSS（如果配置了）
+	var ossURL string
+	if h.bucket == nil {
+		log.Printf("[snapshot] OSS 未配置，跳过上传，回调 Python 通知失败状态 device=%s req=%s", msg.DeviceID, msg.ReqID)
+		// 回调 Python，告知没有可用的 snapshot URL（由业务侧决定如何处理）
+		h.notifyPython(msg.DeviceID, msg.ReqID, "")
+		return
+	}
+
+	if err = h.bucket.PutObject(
 		objectKey,
 		bytes.NewReader(imgBytes),
 		oss.ContentType("image/jpeg"),
-	)
-	if err != nil {
+	); err != nil {
 		log.Printf("[snapshot] OSS 上传失败: %v", err)
+		h.notifyPython(msg.DeviceID, msg.ReqID, "")
 		return
 	}
 
 	// 5. 拼 OSS URL
-	ossURL := fmt.Sprintf(
+	ossURL = fmt.Sprintf(
 		"https://%s.%s/%s",
 		os.Getenv("OSS_BUCKET"),
 		os.Getenv("OSS_ENDPOINT"),
@@ -209,7 +217,7 @@ func (h *Handler) handleSnapshot(msg DeviceMessage) {
 
 	log.Printf("[snapshot] 上传成功: %s", ossURL)
 
-	// 5. 回调 Python
+	// 6. 回调 Python
 	h.notifyPython(msg.DeviceID, msg.ReqID, ossURL)
 }
 
@@ -217,7 +225,14 @@ func (h *Handler) handleSnapshot(msg DeviceMessage) {
 func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 	// 1. 从 Redis 模糊查询所有在线 Key
 	// 注意：ctx 需要你在文件开头定义 var ctx = context.Background()
-	keys, _ := h.Manager.rdb.Keys(ctx, "device:online:*").Result()
+	var keys []string
+	if h.Manager.rdb != nil {
+		k, _ := h.Manager.rdb.Keys(ctx, "device:online:*").Result()
+		keys = k
+	} else {
+		log.Printf("[GetStats] Redis 未连接，返回空在线列表")
+		keys = []string{}
+	}
 
 	// 2. 构造返回数据
 	stats := map[string]interface{}{

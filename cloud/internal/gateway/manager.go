@@ -179,7 +179,6 @@ func (m *DeviceManager) GetConnection(deviceID string) (*websocket.Conn, bool) {
 
 // 核心函数：通知 Python 业务中心设备状态变更
 func (m *DeviceManager) notifyPythonStatus(deviceID string, status string) {
-
 	pythonWebhookURL := "http://127.0.0.1:5000/api/device/status"
 	payload := map[string]interface{}{
 		"device_id":  deviceID,
@@ -197,6 +196,13 @@ func (m *DeviceManager) notifyPythonStatus(deviceID string, status string) {
 			return
 		}
 		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			log.Printf("[Webhook] Python 返回非 200: %d", resp.StatusCode)
+			return
+		}
+
+		log.Printf("[Webhook] 状态回调成功 device=%s status=%s", deviceID, status)
 	}()
 }
 
@@ -250,6 +256,8 @@ func (h *Handler) notifyPython(deviceID, reqID, snapshotURL string) {
 		deviceID,
 		reqID,
 	)
+}
+
 // CheckAuth 校验设备身份
 func (m *DeviceManager) CheckAuth(deviceID, token string) bool {
 	if deviceID == "" || token == "" {
