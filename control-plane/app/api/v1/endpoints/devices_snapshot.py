@@ -43,10 +43,12 @@ class SnapshotCallback(BaseModel):
 
 # 设备截图回调接口
 @router.post("/snapshot/callback")
-def snapshot_callback(body: SnapshotCallback):
+async def snapshot_callback(body: SnapshotCallback):
     try:
         # 传递 url 而不是 base64
-        path = receive_snapshot_callback(body.device_id, body.snapshot_url)
+        # path = receive_snapshot_callback(body.device_id, body.snapshot_url)
+        #改为异步调用
+        path = await receive_snapshot_callback(body.device_id, body.snapshot_url)
         return {"status": "ok", "url": path}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

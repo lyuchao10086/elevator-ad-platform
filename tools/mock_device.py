@@ -16,42 +16,53 @@ def simulate_elevator(device_id, token): # 增加 token 参数
     
     def on_message(ws, message):
         data = json.loads(message)
+        
+        # 1. 过滤心跳日志，保持终端干净
+        if data.get("type") == "pong":
+            return
+            
         print(f"[{device_id}] 收到服务器指令: {data}")
         
-        if data.get("type") == "pong":
-            pass
-            
-        # 注意：这里判断指令类型要跟 Python 后端发的一致
-        # 如果你后端发的是 SNAPSHOT，这里就改 SNAPSHOT
-    
-        
-        if data.get("type") == "snapshot_request" :
-            # 获取请求 ID
+        # --- 核心改动：兼容性判断 ---
+        # 逻辑 A:  snapshot_request
+        # 逻辑 B:  command + SNAPSHOT
+        is_old_style = (data.get("type") == "snapshot_request")
+        is_new_style = (data.get("type") == "command" and data.get("payload") == "SNAPSHOT")
+
+        if is_old_style or is_new_style:
+            # 统一提取 req_id
             req_id = data.get("req_id", "unknown") 
-            payload = data.get("payload", {})
-            print(f"[{device_id}] 开始处理截图请求 req_id={req_id}, 参数={payload}")
-            # 读取本地图片(用一张固定图片做测试)
+            print(f"[{device_id}] 📸 正在处理截图请求 (模式: {'旧' if is_old_style else '新'}), req_id={req_id}")
+            
+            # 读取本地图片逻辑（保持不变）
             try:
                 with open("test_snapshot.jpg", "rb") as f:
                     img_bytes = f.read()
                 img_b64 = base64.b64encode(img_bytes).decode("utf-8")
             except FileNotFoundError:
-                img_b64 = "BASE64_MOCK_DATA" # 没图片就发假数据测试
+                img_b64 = "BASE64_MOCK_DATA" 
                 print(f"[{device_id}] 警告: 未找到 test_snapshot.jpg")
 
+            # --- 关键点：构造回复消息 ---
+            # 为了兼容你的 Go 后端 handler.go，必须使用 snapshot_response 且数据放在 payload 里
             snapshot_msg = {
-                "type": "snapshot_response",
-                "device_id": device_id, # 必须是当前连接的 ID
-                "req_id": req_id,       # 必须把 req_id 原样传回，否则 Python 认不出是谁的回复
+                "type": "snapshot_response", # 匹配 handler.go 第 118 行的 case
+                "device_id": device_id,
+                "req_id": req_id,
                 "ts": int(time.time()),
-                "payload": {
-                    "format": "jpeg",
-                    "data": img_b64
+                "payload": {                 # 匹配 handler.go 第 150-155 行的解析结构
+                    "format": "jpg",
+                    "quality": 80,
+                    "resolution": "1920x1080",
+                    "data": img_b64          # 图片数据放在这里
                 }
             }
-
+            
+            # 如果别人原来的逻辑还需要 snapshot_response 以外的类型，可以在这里加判断
+            # 但根据你提供的 handler.go，Go 网关只认 snapshot_response
+            
             ws.send(json.dumps(snapshot_msg))
-            print(f"[{device_id}] 已上传截图回复")
+            print(f"[{device_id}] ✅ 已上传截图回复 (req_id: {req_id})")
 
     def on_error(ws, error):
         print(f"[{device_id}] 错误: {error}")

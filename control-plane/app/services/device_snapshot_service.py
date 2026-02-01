@@ -46,7 +46,7 @@ async def request_device_snapshot(device_id: str, timeout: Optional[int] = None)
         _waiters.pop(device_id, None)
 
 # --- 修复后的回调函数：删掉了旧的重复定义，使用 threadsafe 写法 ---
-def receive_snapshot_callback(device_id: str, snapshot_url: str) -> str:
+async def receive_snapshot_callback(device_id: str, snapshot_url: str) -> str:
     """
     由 Go 网关触发的同步回调接口调用此函数
     """

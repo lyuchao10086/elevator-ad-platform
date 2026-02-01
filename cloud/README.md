@@ -30,7 +30,7 @@ go mod tidy
 ## 5. 测试
 * 启动redis-server.exe
 * 运行main.go
-* 运行python test_device.py
+* 运行python mock_device.py
 
 ### 开始“三步走”联调测试
 1. 模拟注册（领钥匙）
