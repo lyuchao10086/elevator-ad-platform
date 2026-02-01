@@ -5,9 +5,25 @@ import (
 	"net/http"
 
 	"elevator_project/internal/gateway"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	//加载环境配置
+	err := godotenv.Load(".env")
+
+	// 如果上面的失败了，尝试往上一级找 (针对在 cmd 目录下运行的情况)
+	if err != nil {
+		err = godotenv.Load("../.env")
+	}
+
+	if err != nil {
+		log.Println("未加载到 .env 文件，将使用系统环境变量")
+	} else {
+		log.Println("成功加载 .env 配置")
+	}
+
 	mgr := gateway.NewDeviceManager()
 
 	// ✅ 在程序启动时初始化 OSS
@@ -21,6 +37,8 @@ func main() {
 
 	// 2. 北向接口：给 Python 调用的
 	http.HandleFunc("/api/send", handler.HandleCommand)
+	// 新增：python触发设备截图
+	http.HandleFunc("/api/v1/devices/remote/", handler.HandleRemoteSnapshot)
 	// 新增：仪表盘数据接口
 	http.HandleFunc("/api/stats", handler.GetStats)
 

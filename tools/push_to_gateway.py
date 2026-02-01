@@ -6,7 +6,7 @@ import threading
 import time
 #向GO网关发送指令
 def push_command_to_elevator(device_id, command_type, extra_data):
-    # 网关的北向接口地址 (对应你 main.go 里的 /api/send)
+    # 网关的snapshot请求接口地址 (对应你 main.go 里的 /api/send)
     url = "http://127.0.0.1:8080/api/send"
     
     # 构建发送给 Go 网关的 JSON 数据
@@ -32,6 +32,26 @@ def push_command_to_elevator(device_id, command_type, extra_data):
             
     except Exception as e:
         print(f"🚀 无法连接到网关: {e}")
+# 新增一个「远程截图请求函数」
+def request_remote_snapshot(device_id):
+    url = f"http://127.0.0.1:8080/api/v1/devices/remote/{device_id}/snapshot"
+
+    print(f"[Python] 请求设备截图: {device_id}")
+
+    try:
+        resp = requests.get(url, timeout=5)
+
+        if resp.status_code == 200:
+            data = resp.json()
+            req_id = data.get("req_id")
+            print(f"✅ 截图请求已受理 req_id={req_id}")
+            return req_id
+        elif resp.status_code == 404:
+            print("❌ 设备不在线")
+        else:
+            print(f"⚠️ 网关异常: {resp.status_code} {resp.text}")
+    except Exception as e:
+        print(f"🚀 请求失败: {e}")
 
 # ------------------------------
 # 2️⃣ 接收设备上线/掉线通知
@@ -56,7 +76,7 @@ def device_status_update():
     print(f"[Python] 设备状态变更: {device_id} -> {status} at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(event_time))}")
     return jsonify({"code": 0, "message": "ok"})
 #回调接口（GO回调截图完成）
-@app.route("/api/v1/devices/snapshot/callback", methods=["POST"])
+@app.route("/api/v1/devices/remote/snapshot/callback", methods=["POST"])
 def snapshot_callback():
     data = request.get_json()
 
@@ -74,20 +94,20 @@ def snapshot_callback():
 # 监听设备在线/掉线线程
 def run_flask():
     print("[Python] 后端启动，监听设备状态变化...")
-    app.run(host="0.0.0.0", port=5000)
+    app.run(port=5000)
 
 #向设备发起截图请求进程
 def business_logic():
     time.sleep(5)  # 等待设备上线
     print("[Python] 向设备发送截图请求")
-    push_command_to_elevator(
-        device_id="ELEVATOR_SH_001",
-        command_type="CAPTURE_SCREEN",
-        extra_data={
-            "req_id": "req-001"
-        }
-    )
-
+    # push_command_to_elevator(
+    #     device_id="ELEVATOR_53D246",
+    #     command_type="CAPTURE_SCREEN",
+    #     extra_data={
+    #         "req_id": "req-001"
+    #     }
+    # )
+    request_remote_snapshot("ELEVATOR_53D246")
 
 if __name__ == "__main__":
     # 测试案例 1：让 001 号电梯重启

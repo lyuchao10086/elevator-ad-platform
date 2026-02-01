@@ -242,7 +242,7 @@ func (h *Handler) notifyPython(deviceID, reqID, snapshotURL string) {
 		// callback = "http://127.0.0.1:5000/api/v1/devices/snapshot/callback"
 		callback = "http://127.0.0.1:8000/api/v1/devices/remote/snapshot/callback"
 	}
-	// callback = "http://127.0.0.1:8000/api/v1/devices/remote/snapshot/callback"
+	// callback = "http://127.0.0.1:5000/api/v1/devices/remote/snapshot/callback"
 	body := map[string]string{
 		"device_id":    deviceID,
 		"req_id":       reqID,
