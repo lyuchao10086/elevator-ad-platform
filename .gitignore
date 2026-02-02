@@ -368,6 +368,6 @@ data/materials/
 
 # local uploaded materials
 control-plane/data/materials/*
-!control-plane/data/materials/index.json
+!control-plane/data/materials/.gitkeep
 
 cloud/.env

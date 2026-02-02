@@ -4,10 +4,12 @@ import os
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from typing import Literal
 
 MATERIAL_DIR = Path("data/materials")
 INDEX_PATH = MATERIAL_DIR / "index.json"
 
+MaterialStatus = Literal["uploaded","transcoding","done,","failed"]
 _LOCK = threading.Lock()
 
 
@@ -54,6 +56,14 @@ def upsert_material(meta: Dict[str, Any]) -> None:
         data["items"] = items
         _atomic_write(data)
 
+def update_material_status(material_id: str, status:MaterialStatus) -> None:
+    """
+    仅更新素材状态，不改动其他字段
+    """
+    upsert_material({
+        "material_id": material_id,
+        "status": status,
+    })
 
 def get_material(material_id: str) -> Optional[Dict[str, Any]]:
     with _LOCK:
