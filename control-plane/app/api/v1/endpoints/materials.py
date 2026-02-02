@@ -1,7 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException 
 from app.schemas.material import MaterialUploadResponse
 from app.services.material_service import upsert_material
-from app.services.material_service import list_materials,get_material
+from app.services.material_service import list_materials,get_material,update_material_status
 from app.schemas.material import MaterialListResponse,MaterialMeta
 from fastapi.responses import FileResponse
 from app.services.material_service import get_material_file_path,get_material
@@ -11,7 +11,12 @@ import uuid
 from pathlib import Path
 from datetime import datetime, timezone
 
+from pydantic import BaseModel
+from typing import Literal
+
 router = APIRouter()
+class MaterialStatusUpdateRequest(BaseModel):
+    status: Literal["uploaded","transcoding","done","failed"]
 
 # PR-2：先落到本地目录，后面再换对象存储/转码队列” 
 MATERIAL_DIR = Path("data/materials")
@@ -86,3 +91,14 @@ def download_material_file(material_id: str):
         filename=download_name,
         media_type="application/octet_stream",
     )
+
+@router.patch("/{material_id}/status")
+def patch_material_status(material_id:str, body:MaterialStatusUpdateRequest):
+    item = get_material(material_id)
+    if not item:
+        raise HTTPException(status_code=404,detail="material not found")
+
+    update_material_status(material_id,body.status)
+    
+    #返回更新后的 meta,方便在swagger里直接确认
+    return get_material(material_id)
