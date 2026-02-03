@@ -1,8 +1,12 @@
 from pydantic import BaseModel
 from typing import Dict,Any,List,Literal,Optional
+from enum import Enum
 
-
-MaterialStatus = Literal["uploaded","transcoding","done","failed"]
+class MaterialStatus(str,Enum):
+    uploaded = "uploaded"
+    transcoding = "transcoding"
+    done = "done"
+    failed = "failed"
 
 class MaterialMeta(BaseModel):
     material_id: str
@@ -25,4 +29,7 @@ class MaterialListResponse(BaseModel):
     items: List[MaterialMeta]
 
 class MaterialStatusPatchRequest(BaseModel):
+    status: MaterialStatus
+    
+class MaterialStatusUpdateRequest(BaseModel):
     status: MaterialStatus

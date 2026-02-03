@@ -15,11 +15,11 @@ _LOCK = threading.Lock()
 
 _ALLOWED_STATUSES = {"uploaded","transcoding","done","failed"}
 
-_ALLOWED_TRANSITIONS = {
-    "uploaded": {"uploaded", "transcoding", "failed"},
-    "transcoding": {"transcoding", "done", "failed"},
-    "done": {"done"},
-    "failed": {"failed"},
+ALLOWED_TRANSITIONS = {
+    "uploaded": {"transcoding"},
+    "transcoding": {"done", "failed"},
+    "done": set(),      # 如果允许 done -> transcoding，就加上 {"transcoding"}
+    "failed": {"transcoding"},  # 可选：失败后允许重试转码
 }
 
 def _ensure_paths():
@@ -66,22 +66,26 @@ def upsert_material(meta: Dict[str, Any]) -> None:
         _atomic_write(data)
 
 def update_material_status(material_id: str, new_status: str) -> Dict[str, Any]:
-    item = get_material(material_id)
-    if not item:
-        raise KeyError("material not found")
+    with _LOCK:
+        data = _read_index()
+        items = data.get("items", [])
+        for i, it in enumerate(items):
+            if it.get("material_id") == material_id:
+                old = it.get("status")
+                if old is None:
+                    old = "uploaded"
 
-    if new_status not in _ALLOWED_STATUSES:
-        raise ValueError(f"invalid status: {new_status}")
+                allowed = ALLOWED_TRANSITIONS.get(old, set())
+                if new_status not in allowed and new_status != old:
+                    raise ValueError(f"invalid status transition: {old} -> {new_status}")
 
-    old_status = item.get("status", "uploaded")
-    allowed = _ALLOWED_TRANSITIONS.get(old_status, set())
-    if new_status not in allowed:
-        raise ValueError(f"invalid transition: {old_status} -> {new_status}")
+                it["status"] = new_status
+                items[i] = it
+                data["items"] = items
+                _atomic_write(data)
+                return it
 
-    item["status"] = new_status
-    item["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    upsert_material(item)
-    return item
+    raise KeyError("material not found")
 
 
 def get_material(material_id: str) -> Optional[Dict[str, Any]]:

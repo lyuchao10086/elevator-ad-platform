@@ -44,3 +44,80 @@ control-plane/
 ├─ pyproject.toml        # Python 依赖定义
 ├─ .env.example          # 环境变量示例
 └─ README.md
+```
+
+---
+
+## 本地开发与调试
+
+> 说明：所需环境依赖组可查看`pyproject.toml` 
+> python环境下请先用 venv 创建隔离环境，然后按需安装依赖。
+> 另外，也可以用conda配置依赖环境
+
+### 1) 建议的基础依赖
+
+```bash
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+
+pip install fastapi uvicorn pydantic pydantic-settings
+pip install requests redis python-multipart psycopg2-binary
+```
+
+#### Conda 环境（推荐 conda-forge）
+
+```bash
+conda create -n elevator-control-plane python=3.10 -y
+conda activate elevator-control-plane
+conda install -c conda-forge fastapi uvicorn pydantic pydantic-settings requests redis python-multipart psycopg2 -y
+```
+
+### 2) 启动服务（调试模式）
+
+```bash
+python -m uvicorn app.main:app --reload --port 8000
+```
+
+常用调试接口：
+- `GET /health`：服务存活检查
+- `GET /api/debug/db/ping`：数据库连接检查（需先配置 DB）
+- `GET /api/v1/devices/remote/{device_id}/snapshot`：触发截图（需 Go 网关在线）
+
+数据库与环境变量请参考：`control-plane/DB_SETUP.md`。
+
+---
+
+## 测试（当前为预留）
+
+> 目前项目尚未包含 `tests/`，但建议按以下依赖与命令准备测试环境。
+
+### 1) 测试依赖
+
+```bash
+pip install pytest pytest-asyncio httpx
+```
+
+### 2) 运行测试
+
+```bash
+python -m pytest -q
+```
+
+### 3) 推荐测试目录结构（建议）
+
+```text
+control-plane/
+└─ tests/
+   ├─ api/
+   ├─ services/
+   └─ conftest.py
+```
+
+### 4) 集成依赖提示
+
+如测试依赖 Postgres / Redis，请先启动对应服务，并配置：
+- `PG_HOST / PG_PORT / PG_USER / PG_PASSWORD / PG_DB`
+- `REDIS_HOST / REDIS_PORT / REDIS_DB`
+
+必要时可在 `tests/conftest.py` 中统一加载 `.env`。
