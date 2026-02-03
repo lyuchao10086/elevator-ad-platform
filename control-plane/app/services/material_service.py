@@ -5,6 +5,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from typing import Literal
+from datetime import datetime,timezone
 
 MATERIAL_DIR = Path("data/materials")
 INDEX_PATH = MATERIAL_DIR / "index.json"
@@ -12,6 +13,14 @@ INDEX_PATH = MATERIAL_DIR / "index.json"
 MaterialStatus = Literal["uploaded","transcoding","done,","failed"]
 _LOCK = threading.Lock()
 
+_ALLOWED_STATUSES = {"uploaded","transcoding","done","failed"}
+
+_ALLOWED_TRANSITIONS = {
+    "uploaded": {"uploaded", "transcoding", "failed"},
+    "transcoding": {"transcoding", "done", "failed"},
+    "done": {"done"},
+    "failed": {"failed"},
+}
 
 def _ensure_paths():
     MATERIAL_DIR.mkdir(parents=True, exist_ok=True)
@@ -56,14 +65,24 @@ def upsert_material(meta: Dict[str, Any]) -> None:
         data["items"] = items
         _atomic_write(data)
 
-def update_material_status(material_id: str, status:MaterialStatus) -> None:
-    """
-    仅更新素材状态，不改动其他字段
-    """
-    upsert_material({
-        "material_id": material_id,
-        "status": status,
-    })
+def update_material_status(material_id: str, new_status: str) -> Dict[str, Any]:
+    item = get_material(material_id)
+    if not item:
+        raise KeyError("material not found")
+
+    if new_status not in _ALLOWED_STATUSES:
+        raise ValueError(f"invalid status: {new_status}")
+
+    old_status = item.get("status", "uploaded")
+    allowed = _ALLOWED_TRANSITIONS.get(old_status, set())
+    if new_status not in allowed:
+        raise ValueError(f"invalid transition: {old_status} -> {new_status}")
+
+    item["status"] = new_status
+    item["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    upsert_material(item)
+    return item
+
 
 def get_material(material_id: str) -> Optional[Dict[str, Any]]:
     with _LOCK:

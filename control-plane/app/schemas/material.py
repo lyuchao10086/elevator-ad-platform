@@ -1,8 +1,8 @@
 from pydantic import BaseModel
-from typing import Dict,Any,List,Optional
-from typing import Literal
+from typing import Dict,Any,List,Literal,Optional
 
-MaterialStatus = Literal["uploaded","transcoding","done"]
+
+MaterialStatus = Literal["uploaded","transcoding","done","failed"]
 
 class MaterialMeta(BaseModel):
     material_id: str
@@ -23,3 +23,6 @@ class MaterialUploadResponse(BaseModel):
 class MaterialListResponse(BaseModel):
     total: int
     items: List[MaterialMeta]
+
+class MaterialStatusPatchRequest(BaseModel):
+    status: MaterialStatus
