@@ -1,10 +1,8 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException 
-from app.schemas.material import MaterialUploadResponse
-from app.services.material_service import upsert_material
-from app.services.material_service import list_materials,get_material,update_material_status
-from app.schemas.material import MaterialListResponse,MaterialMeta,MaterialStatusPatchRequest
+from app.services.material_service import upsert_material,list_materials,get_material,update_material_status
+from app.schemas.material import MaterialUploadResponse,MaterialListResponse,MaterialMeta,MaterialStatusPatchRequest,MaterialTranscodeCallbackRequest
 from fastapi.responses import FileResponse
-from app.services.material_service import get_material_file_path,get_material,update_material_status
+from app.services.material_service import get_material_file_path,get_material,update_material_status,apply_transcode_callback
 
 import hashlib
 import uuid
@@ -96,6 +94,19 @@ def download_material_file(material_id: str):
 def patch_material_status(material_id: str, body: MaterialStatusPatchRequest):
     try:
         return update_material_status(material_id, body.status)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="material not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{material_id}/transcode/callback", response_model=MaterialMeta)
+def transcode_callback(material_id: str, body: MaterialTranscodeCallbackRequest):
+    try:
+        # pydantic v2 用 model_dump；v1 用 dict()
+        payload = body.model_dump() if hasattr(body, "model_dump") else body.dict()
+        return apply_transcode_callback(material_id, payload)
     except KeyError:
         raise HTTPException(status_code=404, detail="material not found")
     except ValueError as e:

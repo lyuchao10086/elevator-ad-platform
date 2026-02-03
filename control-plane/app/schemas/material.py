@@ -33,3 +33,11 @@ class MaterialStatusPatchRequest(BaseModel):
     
 class MaterialStatusUpdateRequest(BaseModel):
     status: MaterialStatus
+    
+class MaterialTranscodeCallbackRequest(BaseModel):
+    status: Literal["done", "failed"]        # 回调只允许终态
+    duration: Optional[int] = None           # 秒
+    type: Optional[str] = None               # video/image/pdf...
+    output_path: Optional[str] = None        # 转码后文件路径（或对象存储 key）
+    message: Optional[str] = None            # 失败原因/说明
+    extra: Optional[Dict[str, Any]] = None   # 扩展字段
