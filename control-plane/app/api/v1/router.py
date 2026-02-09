@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import devices, devices_snapshot,campaigns,materials,debug  # 以及 campaigns/materials/...
+from app.api.v1.endpoints import devices, devices_snapshot,campaigns,materials,debug,commands  # 以及 campaigns/materials/...
 
 api_router = APIRouter()
 
@@ -9,6 +9,8 @@ api_router.include_router(devices_snapshot.router, prefix="/devices/remote", tag
 api_router.include_router(materials.router, prefix="/materials", tags=["Materials"])
 api_router.include_router(campaigns.router, prefix="/campaigns", tags=["Campaigns"])
 api_router.include_router(debug.router, prefix="/debug", tags=["Debug"])
+
+api_router.include_router(commands.router, prefix="/commands", tags=["Commands"]) 
 
 # 2. 【核心修复】给前端那些“自动请求”补上路标，消除终端 404
 @api_router.get("/analytics/summary")
