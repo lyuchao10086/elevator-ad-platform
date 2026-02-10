@@ -32,6 +32,9 @@ go mod tidy
 * 运行main.go
 * 运行python mock_device.py
 
+
+* 在control-plane下运行python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+
 ### 开始“三步走”联调测试
 1. 模拟注册（领钥匙）
 打开 Postman，点击 New Request：

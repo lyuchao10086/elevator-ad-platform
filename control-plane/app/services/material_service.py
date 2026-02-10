@@ -18,7 +18,6 @@ ALLOWED_TRANSITIONS = {
     "failed": set(),
 }
 
-
 def _ensure_paths():
     MATERIAL_DIR.mkdir(parents=True, exist_ok=True)
     if not INDEX_PATH.exists():

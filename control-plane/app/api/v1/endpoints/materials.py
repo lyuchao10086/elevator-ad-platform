@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from app.schemas.material import (
     MaterialUploadResponse,
@@ -15,24 +14,6 @@ from app.services.material_service import (
     apply_transcode_callback,
     delete_material,
 )
-=======
-from fastapi import APIRouter, UploadFile, File, HTTPException
-from app.schemas.material import (
-    MaterialUploadResponse,
-    MaterialListResponse,
-    MaterialMeta,
-    MaterialStatusPatchRequest,
-    MaterialTranscodeCallbackRequest,
-)
-from app.services.material_service import (
-    upsert_material,
-    list_materials,
-    get_material,
-    update_material_status,
-    apply_transcode_callback,
-    delete_material,
-)
->>>>>>> 3ec9ac1 (feat(materials): add status flow, callback, and delete)
 from fastapi.responses import FileResponse
 from app.services.material_service import get_material_file_path, get_material
 
@@ -116,7 +97,6 @@ def download_material_file(material_id: str):
         filename=download_name,
         media_type="application/octet_stream",
     )
-
 @router.patch("/{material_id}/status", response_model=MaterialMeta)
 def patch_material_status(material_id: str, body: MaterialStatusPatchRequest):
     try:
@@ -127,7 +107,6 @@ def patch_material_status(material_id: str, body: MaterialStatusPatchRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.post("/{material_id}/transcode/callback", response_model=MaterialMeta)
 def transcode_callback(material_id: str, body: MaterialTranscodeCallbackRequest):
@@ -140,8 +119,6 @@ def transcode_callback(material_id: str, body: MaterialTranscodeCallbackRequest)
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.delete("/{material_id}")
 def delete_one_material(material_id: str):
     try:
