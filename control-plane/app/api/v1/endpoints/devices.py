@@ -40,6 +40,13 @@ def register_device(payload: DeviceRegisterRequest):
     rdb.hset(f"device:info:{device_id}", "location", payload.location)
     rdb.hset(f"device:info:{device_id}", "registered_at", str(uuid.uuid1()))
     
+    # Best-effort: write to DB if available
+    try:
+        db_service.insert_device(device_id=device_id, location=payload.location, status="online")
+    except Exception:
+        # Do not fail registration if DB is not ready
+        pass
+
     # -------------------------
 
     return DeviceRegisterResponse(

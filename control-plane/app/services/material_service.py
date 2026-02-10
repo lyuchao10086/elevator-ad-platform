@@ -3,14 +3,20 @@ import json
 import os
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from typing import Literal
+from typing import Any, Dict, List, Optional, Literal
 
 MATERIAL_DIR = Path("data/materials")
 INDEX_PATH = MATERIAL_DIR / "index.json"
 
-MaterialStatus = Literal["uploaded","transcoding","done,","failed"]
+MaterialStatus = Literal["uploaded", "transcoding", "done", "failed"]
 _LOCK = threading.Lock()
+
+ALLOWED_TRANSITIONS = {
+    "uploaded": {"transcoding", "failed"},
+    "transcoding": {"done", "failed"},
+    "done": set(),
+    "failed": set(),
+}
 
 
 def _ensure_paths():
@@ -56,14 +62,67 @@ def upsert_material(meta: Dict[str, Any]) -> None:
         data["items"] = items
         _atomic_write(data)
 
-def update_material_status(material_id: str, status:MaterialStatus) -> None:
+def update_material_status(material_id: str, new_status: str, patch: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    patch = patch or {}
+    with _LOCK:
+        data = _read_index()
+        items = data.get("items", [])
+
+        target = None
+        for it in items:
+            if it.get("material_id") == material_id:
+                target = it
+                break
+        if not target:
+            raise KeyError("material not found")
+
+        old_status = target.get("status", "uploaded")
+        if new_status not in ALLOWED_TRANSITIONS.get(old_status, set()):
+            raise ValueError(f"invalid status transition: {old_status} -> {new_status}")
+
+        target["status"] = new_status
+        for k, v in patch.items():
+            if k == "extra" and isinstance(v, dict):
+                target.setdefault("extra", {})
+                target["extra"].update(v)
+            else:
+                target[k] = v
+
+        upsert_material(target)
+        return target
+
+
+def apply_transcode_callback(material_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    仅更新素材状态，不改动其他字段
+    Transcode callback: update material status to done/failed and write output meta into extra.
     """
-    upsert_material({
-        "material_id": material_id,
-        "status": status,
-    })
+    item = get_material(material_id)
+    if not item:
+        raise KeyError("material not found")
+
+    new_status = payload.get("status")
+    if not new_status:
+        raise ValueError("missing status")
+
+    updated = update_material_status(material_id, new_status)
+
+    extra = updated.get("extra") or {}
+    if payload.get("duration") is not None:
+        extra["duration"] = payload["duration"]
+    if payload.get("type") is not None:
+        extra["type"] = payload["type"]
+    if payload.get("output_path") is not None:
+        extra["output_path"] = payload["output_path"]
+    if payload.get("message") is not None:
+        extra["transcode_message"] = payload["message"]
+    payload_extra = payload.get("extra")
+    if isinstance(payload_extra, dict):
+        extra.update(payload_extra)
+
+    updated["extra"] = extra
+    upsert_material(updated)
+    return updated
+
 
 def get_material(material_id: str) -> Optional[Dict[str, Any]]:
     with _LOCK:
@@ -79,6 +138,34 @@ def list_materials(offset: int = 0, limit: int = 50) -> List[Dict[str, Any]]:
         data = _read_index()
         items = data.get("items", [])
         return items[offset : offset + limit]
+
+
+def delete_material(material_id: str) -> None:
+    with _LOCK:
+        data = _read_index()
+        items = data.get("items", [])
+        target = None
+        remain = []
+        for it in items:
+            if it.get("material_id") == material_id:
+                target = it
+            else:
+                remain.append(it)
+        if not target:
+            raise KeyError("material not found")
+        data["items"] = remain
+        _atomic_write(data)
+
+    extra = target.get("extra") or {}
+    path_str = extra.get("path")
+    if path_str:
+        p = Path(path_str)
+        try:
+            if p.exists() and p.is_file():
+                p.unlink()
+        except Exception:
+            # Best-effort delete; index already removed
+            pass
 
 def get_material_file_path(material_id: str) -> Optional[Path]:
     item = get_material(material_id)

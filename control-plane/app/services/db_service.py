@@ -122,3 +122,16 @@ def count_devices(q=None):
         return cur.fetchone()[0]
     finally:
         conn.close()
+
+
+def insert_device(device_id: str, location: str = None, status: str = "online") -> None:
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO devices (device_id, location, status, created_at) VALUES (%s, %s, %s, NOW())",
+            (device_id, location, status),
+        )
+        conn.commit()
+    finally:
+        conn.close()
