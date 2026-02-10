@@ -1,19 +1,12 @@
 from pydantic import BaseModel
-from typing import Dict,Any,List,Literal,Optional
-from enum import Enum
-
-class MaterialStatus(str,Enum):
-    uploaded = "uploaded"
-    transcoding = "transcoding"
-    done = "done"
-    failed = "failed"
+from typing import Dict, Any, List, Optional, Literal
 
 class MaterialMeta(BaseModel):
     material_id: str
     filename: str
     md5: str
     size_bytes: int
-    status: MaterialStatus
+    status: Literal["uploaded", "transcoding", "done", "failed"]
     created_at: str
     extra: Optional[Dict[str,Any]] = None
 
@@ -21,7 +14,7 @@ class MaterialUploadResponse(BaseModel):
     material_id: str
     filename: str
     md5: str
-    status: MaterialStatus
+    status: Literal["uploaded", "transcoding", "done", "failed"] = "uploaded"
     extra: Optional[Dict[str,Any]] = None
 
 class MaterialListResponse(BaseModel):
@@ -29,15 +22,13 @@ class MaterialListResponse(BaseModel):
     items: List[MaterialMeta]
 
 class MaterialStatusPatchRequest(BaseModel):
-    status: MaterialStatus
-    
-class MaterialStatusUpdateRequest(BaseModel):
-    status: MaterialStatus
-    
+    status: Literal["uploaded", "transcoding", "done", "failed"]
+
+
 class MaterialTranscodeCallbackRequest(BaseModel):
-    status: Literal["done", "failed"]        # 回调只允许终态
-    duration: Optional[int] = None           # 秒
-    type: Optional[str] = None               # video/image/pdf...
-    output_path: Optional[str] = None        # 转码后文件路径（或对象存储 key）
-    message: Optional[str] = None            # 失败原因/说明
-    extra: Optional[Dict[str, Any]] = None   # 扩展字段
+    status: Literal["done", "failed"]
+    duration: Optional[int] = None
+    type: Optional[str] = None
+    output_path: Optional[str] = None
+    message: Optional[str] = None
+    extra: Optional[Dict[str, Any]] = None

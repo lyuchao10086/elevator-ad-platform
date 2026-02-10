@@ -1,20 +1,28 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException 
-from app.services.material_service import upsert_material,list_materials,get_material,update_material_status
-from app.schemas.material import MaterialUploadResponse,MaterialListResponse,MaterialMeta,MaterialStatusPatchRequest,MaterialTranscodeCallbackRequest
+from fastapi import APIRouter, UploadFile, File, HTTPException
+from app.schemas.material import (
+    MaterialUploadResponse,
+    MaterialListResponse,
+    MaterialMeta,
+    MaterialStatusPatchRequest,
+    MaterialTranscodeCallbackRequest,
+)
+from app.services.material_service import (
+    upsert_material,
+    list_materials,
+    get_material,
+    update_material_status,
+    apply_transcode_callback,
+    delete_material,
+)
 from fastapi.responses import FileResponse
-from app.services.material_service import get_material_file_path,get_material,update_material_status,apply_transcode_callback
+from app.services.material_service import get_material_file_path, get_material
 
 import hashlib
 import uuid
 from pathlib import Path
 from datetime import datetime, timezone
 
-from pydantic import BaseModel
-from typing import Literal
-
 router = APIRouter()
-class MaterialStatusUpdateRequest(BaseModel):
-    status: Literal["uploaded","transcoding","done","failed"]
 
 # PR-2：先落到本地目录，后面再换对象存储/转码队列” 
 MATERIAL_DIR = Path("data/materials")
@@ -89,7 +97,6 @@ def download_material_file(material_id: str):
         filename=download_name,
         media_type="application/octet_stream",
     )
-    
 @router.patch("/{material_id}/status", response_model=MaterialMeta)
 def patch_material_status(material_id: str, body: MaterialStatusPatchRequest):
     try:
@@ -104,12 +111,20 @@ def patch_material_status(material_id: str, body: MaterialStatusPatchRequest):
 @router.post("/{material_id}/transcode/callback", response_model=MaterialMeta)
 def transcode_callback(material_id: str, body: MaterialTranscodeCallbackRequest):
     try:
-        # pydantic v2 用 model_dump；v1 用 dict()
         payload = body.model_dump() if hasattr(body, "model_dump") else body.dict()
         return apply_transcode_callback(material_id, payload)
     except KeyError:
         raise HTTPException(status_code=404, detail="material not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+@router.delete("/{material_id}")
+def delete_one_material(material_id: str):
+    try:
+        delete_material(material_id)
+        return {"ok": True}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="material not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
