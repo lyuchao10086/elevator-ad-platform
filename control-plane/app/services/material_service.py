@@ -5,6 +5,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from typing import Literal
+from datetime import datetime,timezone
 
 MATERIAL_DIR = Path("data/materials")
 INDEX_PATH = MATERIAL_DIR / "index.json"
@@ -12,6 +13,14 @@ INDEX_PATH = MATERIAL_DIR / "index.json"
 MaterialStatus = Literal["uploaded","transcoding","done,","failed"]
 _LOCK = threading.Lock()
 
+_ALLOWED_STATUSES = {"uploaded","transcoding","done","failed"}
+
+ALLOWED_TRANSITIONS = {
+    "uploaded": {"transcoding"},
+    "transcoding": {"done", "failed"},
+    "done": set(),      # 如果允许 done -> transcoding，就加上 {"transcoding"}
+    "failed": {"transcoding"},  # 可选：失败后允许重试转码
+}
 
 def _ensure_paths():
     MATERIAL_DIR.mkdir(parents=True, exist_ok=True)
@@ -56,14 +65,73 @@ def upsert_material(meta: Dict[str, Any]) -> None:
         data["items"] = items
         _atomic_write(data)
 
-def update_material_status(material_id: str, status:MaterialStatus) -> None:
+def update_material_status(material_id: str, new_status: str) -> Dict[str, Any]:
+    with _LOCK:
+        data = _read_index()
+        items = data.get("items", [])
+        for i, it in enumerate(items):
+            if it.get("material_id") == material_id:
+                old = it.get("status")
+                if old is None:
+                    old = "uploaded"
+
+                allowed = ALLOWED_TRANSITIONS.get(old, set())
+                if new_status not in allowed and new_status != old:
+                    raise ValueError(f"invalid status transition: {old} -> {new_status}")
+
+                it["status"] = new_status
+                items[i] = it
+                data["items"] = items
+                _atomic_write(data)
+                return it
+
+    raise KeyError("material not found")
+
+
+def apply_transcode_callback(material_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    仅更新素材状态，不改动其他字段
+    转码服务回调：将素材状态更新为 done/failed，并写入转码产物信息到 extra
+    payload 形如：
+      {
+        "status": "done" | "failed",
+        "duration": 15,
+        "type": "video",
+        "output_path": "...",
+        "message": "...",
+        "extra": {...}
+      }
     """
-    upsert_material({
-        "material_id": material_id,
-        "status": status,
-    })
+    item = get_material(material_id)
+    if not item:
+        raise KeyError("material not found")
+
+    new_status = payload.get("status")
+    if new_status is None:
+        raise ValueError("missing status")
+
+    # 复用你的状态机校验（应要求 transcoding -> done/failed）
+    updated = update_material_status(material_id, new_status)
+
+    # 合并额外信息
+    extra = updated.get("extra") or {}
+
+    if payload.get("duration") is not None:
+        extra["duration"] = payload["duration"]
+    if payload.get("type") is not None:
+        extra["type"] = payload["type"]
+    if payload.get("output_path") is not None:
+        extra["output_path"] = payload["output_path"]
+    if payload.get("message") is not None:
+        extra["transcode_message"] = payload["message"]
+
+    payload_extra = payload.get("extra")
+    if isinstance(payload_extra, dict):
+        extra.update(payload_extra)
+
+    updated["extra"] = extra
+    upsert_material(updated)
+    return updated
+
 
 def get_material(material_id: str) -> Optional[Dict[str, Any]]:
     with _LOCK:

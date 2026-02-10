@@ -23,7 +23,7 @@ def create_app():
 
     # expose both /api/v1 and /api for frontend compatibility
     app.include_router(api_router, prefix="/api/v1")
-    app.include_router(api_router, prefix="/api")
+    app.include_router(api_router, prefix="/api",include_in_schema=False) #兼容用， 但Swagger不展示
 
     @app.get("/health")
     def health():
