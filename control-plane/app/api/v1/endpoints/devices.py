@@ -50,7 +50,6 @@ def register_device(payload: DeviceRegisterRequest):
 
 @router.get("/", summary="List devices")
 def list_devices(q: str = None, page: int = 1, page_size: int = 20):
-    print("q是",q) #debug
     try:
         # normalize pagination
         if page < 1:

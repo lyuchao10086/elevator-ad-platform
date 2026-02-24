@@ -1,6 +1,32 @@
 {
   "items": [
     {
+      "material_id": "mat_1af1c128",
+      "ad_id": null,
+      "file_name": "Miradiljan Bawudun - Waz Kiqiptu（Mayliti）.mp3",
+      "filename": "Miradiljan Bawudun - Waz Kiqiptu（Mayliti）.mp3",
+      "md5": "54ab41b57db35125be27396ff23da08a",
+      "size_bytes": 12320438,
+      "status": "uploaded",
+      "created_at": "2026-02-10T10:24:08.318222Z",
+      "uploader_id": "web-admin",
+      "tags": [],
+      "extra": {
+        "path": "data\\materials\\mat_1af1c128_Miradiljan Bawudun - Waz Kiqiptu（Mayliti）.mp3"
+      }
+    },
+    {
+      "material_id": "mat_edde2776",
+      "filename": "The Theory of Computation Part I.ppt",
+      "md5": "11daf83cbb58a116b219871ad94e8670",
+      "size_bytes": 1294336,
+      "status": "uploaded",
+      "created_at": "2026-02-10T09:41:34.432194Z",
+      "extra": {
+        "path": "data\\materials\\mat_edde2776_The Theory of Computation Part I.ppt"
+      }
+    },
+    {
       "material_id": "mat_c7f978a1",
       "filename": "6-3_roadmap.pdf",
       "md5": "63aadf4ef9225d3db14ca5eb8d27c46a",

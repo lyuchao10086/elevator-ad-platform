@@ -34,4 +34,15 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 5. 前端（开发）已配置代理：`web/admin/.env.development` 中 `VITE_API_URL` 默认指向 `http://localhost:8000/api`，启动前端后，DeviceList 页面会请求 `GET /api/devices` 展示设备列表。
 
+6. 创建 `materials` 表：
+
+如果你使用本地 Postgres，请在数据库上运行：
+
+```sql
+-- 在 control-plane/db/init_materials.sql 中已提供建表语句
+\i path/to/elevator-ad-platform/control-plane/db/init_materials.sql
+```
+
+或者手动运行 `init_materials.sql` 中的内容以创建 `materials` 表。上传接口将同时写入本地索引文件（`control-plane/data/materials/index.json`），当 Postgres 可用时，后端也会尝试从数据库读取素材列表。
+
 如果你的 Postgres 使用非默认端口、用户名或密码，请相应调整上述变量。
