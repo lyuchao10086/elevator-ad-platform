@@ -58,19 +58,24 @@ def register_device(payload: DeviceRegisterRequest):
 @router.get("/", summary="List devices")
 def list_devices(q: str = None, page: int = 1, page_size: int = 20):
     try:
-        # normalize pagination
-        if page < 1:
-            page = 1
-        if page_size < 1 or page_size > 1000:
-            page_size = 20
+        # 1. 规范化分页参数
+        if page < 1: page = 1
         offset = (page - 1) * page_size
+        
+        # 2. 从数据库获取基础信息
         items = db_service.list_devices(limit=page_size, offset=offset, q=q)
         total = db_service.count_devices(q=q)
+        
+        # 3. 【核心修改】遍历列表，实时去 Redis 拿状态
+        for item in items:
+            d_id = item.get("device_id")
+            # 这里的 Key 必须和 Go 网关 manager.go 里的 "device:online:" 保持一致
+            is_online = rdb.exists(f"device:online:{d_id}")
+            item["status"] = "online" if is_online else "offline"
+            
         return {"total": total, "items": items}
     except Exception as e:
-        # return an empty list with error message to aid frontend debugging
         return {"total": 0, "items": [], "error": str(e)}
-
 # ... 你原有的代码 (rdb, register_device 等) ...
 
 # --- 在文件末尾添加这个函数 ---

@@ -13,6 +13,12 @@ class Settings(BaseSettings):
     redis_db: int = int(os.getenv("REDIS_DB", "0"))
     redis_password: str = os.getenv("REDIS_PASSWORD", "")
     
+    pg_host: str = "localhost"
+    pg_port: str = "5432"
+    pg_user: str = "postgres"
+    pg_password: str = "123456"
+    pg_db: str = "elevator_ad"
+    
     # Snapshot handling
     # --- Snapshot handling ---
     # 截图保存目录（虽然 Go 传了 OSS，但 Python 也可以选择下载一份做备份）
