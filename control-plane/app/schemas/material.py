@@ -32,14 +32,14 @@ class MaterialListResponse(BaseModel):
     total: int
     items: List[MaterialMeta]
 
-class MaterialStatusPatchRequest(BaseModel):
-    status: Literal["uploaded", "transcoding", "done", "failed"]
+# class MaterialStatusPatchRequest(BaseModel):
+#     status: Literal["uploaded", "transcoding", "done", "failed"]
 
 
-class MaterialTranscodeCallbackRequest(BaseModel):
-    status: Literal["done", "failed"]
-    duration: Optional[int] = None
-    type: Optional[str] = None
-    output_path: Optional[str] = None
-    message: Optional[str] = None
-    extra: Optional[Dict[str, Any]] = None
+# class MaterialTranscodeCallbackRequest(BaseModel):
+#     status: Literal["done", "failed"]
+#     duration: Optional[int] = None
+#     type: Optional[str] = None
+#     output_path: Optional[str] = None
+#     message: Optional[str] = None
+#     extra: Optional[Dict[str, Any]] = None
