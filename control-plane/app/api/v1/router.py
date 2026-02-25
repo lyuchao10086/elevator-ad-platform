@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import devices, devices_snapshot, campaigns, materials, debug  # 以及 campaigns/materials/...
+from app.api.v1.endpoints import devices, devices_snapshot, campaigns, materials, debug,commands  # 以及 campaigns/materials/...
 from app.services import db_service
 
 api_router = APIRouter()
@@ -10,6 +10,8 @@ api_router.include_router(devices_snapshot.router, prefix="/devices/remote", tag
 api_router.include_router(materials.router, prefix="/materials", tags=["Materials"])
 api_router.include_router(campaigns.router, prefix="/campaigns", tags=["Campaigns"])
 api_router.include_router(debug.router, prefix="/debug", tags=["Debug"])
+
+api_router.include_router(commands.router, prefix="/commands", tags=["Commands"]) 
 
 # 2. analytics summary: 从数据库读取在线/离线设备数量；播放相关指标暂用 0
 @api_router.get("/analytics/summary")

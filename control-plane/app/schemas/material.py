@@ -20,6 +20,7 @@ class MaterialMeta(BaseModel):
     updated_at: Optional[datetime] = None
     extra: Optional[Dict[str, Any]] = None
 
+
 class MaterialUploadResponse(BaseModel):
     material_id: str
     filename: str
@@ -30,3 +31,15 @@ class MaterialUploadResponse(BaseModel):
 class MaterialListResponse(BaseModel):
     total: int
     items: List[MaterialMeta]
+
+class MaterialStatusPatchRequest(BaseModel):
+    status: Literal["uploaded", "transcoding", "done", "failed"]
+
+
+class MaterialTranscodeCallbackRequest(BaseModel):
+    status: Literal["done", "failed"]
+    duration: Optional[int] = None
+    type: Optional[str] = None
+    output_path: Optional[str] = None
+    message: Optional[str] = None
+    extra: Optional[Dict[str, Any]] = None
