@@ -235,6 +235,33 @@ func (m *DeviceManager) notifyPythonStatus(deviceID string, status string) {
 	}()
 }
 
+// NotifyCommandCallback 向 control-plane 的 /commands/callback 发回指令执行结果
+func (m *DeviceManager) NotifyCommandCallback(deviceID, cmdID, status, info string) {
+	callback := os.Getenv("CONTROL_PLANE_COMMAND_CALLBACK")
+	if callback == "" {
+		callback = "http://127.0.0.1:8000/api/v1/commands/callback"
+	}
+
+	payload := map[string]string{
+		"device_id": deviceID,
+		"cmd_id":    cmdID,
+		"status":    status,
+		"result":    info,
+	}
+	data, _ := json.Marshal(payload)
+
+	go func() {
+		client := http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Post(callback, "application/json", bytes.NewBuffer(data))
+		if err != nil {
+			log.Printf("[NotifyCommandCallback] 回调失败: %v", err)
+			return
+		}
+		defer resp.Body.Close()
+		log.Printf("[NotifyCommandCallback] 回调成功 device=%s cmd=%s status=%s", deviceID, cmdID, status)
+	}()
+}
+
 // 通知python业务中心截图已生成
 func (h *Handler) notifyPython(deviceID, reqID, snapshotURL string) {
 	callback := os.Getenv("CONTROL_PLANE_SNAPSHOT_CALLBACK")

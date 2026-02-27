@@ -114,6 +114,20 @@ func (h *Handler) DispatchMessage(deviceID string, conn *websocket.Conn) {
 			// 处理截图上传逻辑
 			h.handleSnapshot(msg)
 
+		case "command_response":
+			// 处理设备对指令的回执，期望 payload 中包含 {"cmd_id":"...","status":"success","result":"..."}
+			var data struct {
+				CmdID  string `json:"cmd_id"`
+				Status string `json:"status"`
+				Result string `json:"result"`
+			}
+			if err := json.Unmarshal(msg.Payload, &data); err != nil {
+				log.Printf("[command_response] payload 解析失败: %v", err)
+				break
+			}
+			// 调用 Manager 回调 control-plane
+			h.Manager.NotifyCommandCallback(deviceID, data.CmdID, data.Status, data.Result)
+
 		default:
 			log.Printf("[网关] 收到来自 %s 的未知类型消息: %s", deviceID, msg.Type)
 		}
@@ -132,6 +146,7 @@ func (h *Handler) HandleCommand(w http.ResponseWriter, r *http.Request) {
 		DeviceID string          `json:"device_id"`
 		Command  string          `json:"command"` // 如: REBOOT, UPDATE_SCHEDULE
 		Data     json.RawMessage `json:"data"`
+		CmdID    string          `json:"cmd_id"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -146,10 +161,12 @@ func (h *Handler) HandleCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 将 cmd_id 一并透传给设备，方便设备回报时带回
 	conn.WriteJSON(map[string]interface{}{
 		"type":    "command",
 		"payload": req.Command,
 		"data":    req.Data,
+		"cmd_id":  req.CmdID,
 	})
 	//告诉python后端状态码
 	w.WriteHeader(http.StatusOK)
@@ -228,8 +245,8 @@ func (h *Handler) handleSnapshot(msg DeviceMessage) {
 		)
 		if err != nil {
 			log.Printf("[snapshot] OSS 上传失败: %v", err)
-			// 失败了就给个占位图，保证流程不中断
-			ossURL = "https://via.placeholder.com/150.jpg"
+			// 上传失败时，使用 data URL 回传图片（避免占位图），保证前端可以直接显示
+			ossURL = "data:image/jpeg;base64," + payload.Data
 		} else {
 			// 上传成功，拼真实 URL
 			ossURL = fmt.Sprintf(
@@ -240,9 +257,9 @@ func (h *Handler) handleSnapshot(msg DeviceMessage) {
 			)
 		}
 	} else {
-		// 如果根本没初始化 OSS，直接给假地址
-		log.Printf("[snapshot] OSS 未初始化，跳过上传")
-		ossURL = "https://via.placeholder.com/150.jpg"
+		// 如果根本没初始化 OSS，直接用 data URL 回传图片内容，这样前端无需 OSS 也能展示截图
+		log.Printf("[snapshot] OSS 未初始化，使用 data URL 回传图片")
+		ossURL = "data:image/jpeg;base64," + payload.Data
 	}
 
 	log.Printf("[snapshot] 流程继续，准备回调 Python. URL: %s", ossURL)

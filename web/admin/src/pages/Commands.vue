@@ -99,7 +99,11 @@
               <div v-else-if="selectedAction==='capture'" style="padding:12px;">
                 <div style="font-size:13px;color:#7b8793;">截屏结果</div>
                 <div style="margin-top:8px;border:1px dashed #e6eefc;height:220px;display:flex;align-items:center;justify-content:center;color:#9aa6b6;">
-                  截屏（返回图片）
+                  <div v-if="sending && !snapshotUrl" style="color:#7b8793">请求已发送，等待设备上传截图...</div>
+                  <div v-else-if="snapshotUrl">
+                    <img :src="snapshotUrl" alt="snapshot" style="max-height:100%;max-width:100%;object-fit:contain;" />
+                  </div>
+                  <div v-else style="color:#9aa6b6">尚未截屏或未返回图片</div>
                 </div>
               </div>
 
@@ -155,7 +159,7 @@
     </el-card>
 
     <!-- 确认弹窗 -->
-    <el-dialog :visible.sync="confirmVisible" title="确认下发指令" width="600px">
+    <el-dialog v-model:visible="confirmVisible" title="确认下发指令" width="600px">
       <div>
         <p><strong>目标设备：</strong> {{ selectedDevices.length }} 台</p>
         <p><strong>动作：</strong> {{ actionTitle }}</p>
@@ -234,6 +238,7 @@ export default {
     // params
     const paramTemplate = computed(()=> actions.find(a=>a.key===selectedAction.value) || null)
     const params = reactive({})
+    const snapshotUrl = ref('')
     const expireSec = ref(60)
 
     // confirmation & sending
@@ -359,6 +364,7 @@ export default {
       // clear selected devices and action
       selectedDevices.value = []
       selectedAction.value = ''
+      snapshotUrl.value = ''
       // clear material selection and queries
       selectedMaterial.value = null
       materialQuery.value = ''
@@ -377,17 +383,35 @@ export default {
 
     // prepare confirm (validate structured form)
     const paramRules = {}
-    function onPrepareSend(){
-      const hasDevices = selectedDevices.value && selectedDevices.value.length>0
-      const hasAction = !!selectedAction.value
-      if(!hasDevices && !hasAction){
-        return alert('请先选择目标设备和指令')
-      }
-      if(!hasDevices && hasAction){
-        return alert('未选择设备：请先从左侧列表选择至少一台设备')
-      }
-      if(hasDevices && !hasAction){
-        return alert('未选择指令：请在中间栏选择一个指令')
+    async function onPrepareSend(){
+      try{
+        const devicesArr = (selectedDevices && (selectedDevices.value || selectedDevices)) || []
+        const hasDevices = Array.isArray(devicesArr) && devicesArr.length>0
+        const hasAction = !!selectedAction.value
+        if(!hasDevices && !hasAction){
+          return alert('请先选择目标设备和指令')
+        }
+        if(!hasDevices && hasAction){
+          return alert('未选择设备：请先从左侧列表选择至少一台设备')
+        }
+        if(hasDevices && !hasAction){
+          return alert('未选择指令：请在中间栏选择一个指令')
+        }
+        // 若是截屏动作，要求仅选择单台设备；多设备截屏应逐台发送
+        if(selectedAction.value === 'capture' && Array.isArray(devicesArr) && devicesArr.length !== 1){
+          return alert('截屏操作只支持选择单台设备，请仅选择一台设备后重试')
+        }
+        // 检查所选设备是否在线（仅当 devices 列表里能找到该设备且 status === 'online' 时视为在线）
+        const offlineList = (devicesArr || []).filter(id => {
+          const dev = devices.value.find(d => d.device_id === id)
+          return !dev || dev.status !== 'online'
+        })
+        if(offlineList.length){
+          return alert('以下设备不在线，无法下发指令：' + offlineList.join(', '))
+        }
+      }catch(e){
+        console.error('onPrepareSend error', e)
+        return alert('准备发送时发生错误，详见控制台')
       }
       // validate form if template exists
       const tmpl = paramTemplate.value
@@ -399,12 +423,14 @@ export default {
           }
         }
       }
-      confirmVisible.value = true
+      // 直接发送，不再弹出确认窗口
+      await onSend()
     }
 
     const finalPayloadPreview = computed(()=>{
       const p = JSON.parse(JSON.stringify(params || {}))
-      const payload = { targets: selectedDevices.value, action: selectedAction.value, params: p, expire_sec: expireSec.value }
+      const targets = (selectedDevices && (selectedDevices.value || selectedDevices)) || []
+      const payload = { targets: targets, action: selectedAction.value, params: p, expire_sec: expireSec.value }
       return JSON.stringify(payload,null,2)
     })
 
@@ -414,25 +440,45 @@ export default {
 
     async function onSend(){
       confirmVisible.value = false
-      if(selectedDevices.value.length===0) return
+      const devicesArr = (selectedDevices && (selectedDevices.value || selectedDevices)) || []
+      if(!Array.isArray(devicesArr) || devicesArr.length===0) return alert('未选择设备')
       sending.value = true
       try{
+        const target_device_id = devicesArr.length===1 ? devicesArr[0] : undefined
         const payload = {
           cmd_id: uuidv4(),
-          target_device_id: selectedDevices.value.length===1 ? selectedDevices.value[0] : undefined,
+          target_device_id: target_device_id,
           device_group_id: undefined,
-          target_device_ids: selectedDevices.value.length>1 ? selectedDevices.value : undefined,
+          target_device_ids: devicesArr.length>1 ? devicesArr : undefined,
           action: selectedAction.value,
           params: JSON.parse(JSON.stringify(params || {})),
           send_ts: Math.floor(Date.now()/1000),
           expire_sec: expireSec.value
         }
-        const res = await sendCommand(payload)
-        // optimistic feedback
-        alert('指令已下发: ' + (res.data?.cmd_id || payload.cmd_id))
+        console.debug('onSend payload', payload)
+        // 若为截屏动作，直接调用 snapshot 获取 URL（更直接且能即时展示）
+        if(selectedAction.value === 'capture' && target_device_id){
+          try{
+            const snapRes = await api.get(`/v1/devices/remote/${target_device_id}/snapshot`)
+            const url = snapRes.data?.snapshot_url || snapRes.data?.url || ''
+            if(url) snapshotUrl.value = url
+            // 也记录为已下发
+            alert('截屏指令已下发: ' + (snapRes.data?.cmd_id || payload.cmd_id))
+          }catch(e){
+            console.error('snapshot API failed, fallback to sendCommand', e)
+            const res = await sendCommand(payload)
+            alert('指令已下发: ' + (res.data?.cmd_id || payload.cmd_id))
+            const url = res.data?.data?.url || res.data?.url || ''
+            if(url) snapshotUrl.value = url
+          }
+        }else{
+          const res = await sendCommand(payload)
+          // optimistic feedback
+          alert('指令已下发: ' + (res.data?.cmd_id || payload.cmd_id))
+        }
         await fetchCommands()
         activeStep.value = 0
-      }catch(e){ console.error(e); alert('下发失败') }
+      }catch(e){ console.error('onSend failed', e); alert('下发失败：' + (e && e.message || e)) }
       finally{ sending.value = false }
     }
 
@@ -470,7 +516,7 @@ export default {
       fetchDevices, onDevicePage, selectAllVisible, clearSelection, formatCoord, statusTagType,
       formatSize,
       actions, selectedAction, selectAction, previewTemplate, actionTitle, paramTemplate, params, fieldComponent,
-      resetParams, expireSec, onPrepareSend, confirmVisible, finalPayloadPreview, onSend, sending, previewOnly,
+      resetParams, expireSec, onPrepareSend, confirmVisible, finalPayloadPreview, onSend, sending, previewOnly, snapshotUrl,
       materials, materialQuery, materialLoading, materialsFiltered, selectMaterial, selectedMaterial, onPreviewMaterial, fetchMaterials, onMaterialQueryChange, materialItemStyle,
       commands, previewJSON, fetchCommands
     }

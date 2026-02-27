@@ -9,10 +9,15 @@ from app.core.config import settings
 _waiters = {}
 # 注意：在混合使用同步和异步时，我们直接用字典，依靠主线程的 call_soon_threadsafe 保证安全
 
-def send_remote_command(device_id: str, command: str, data: Optional[str] = "") -> dict:
-    """通过 cloud 网关的 HTTP 接口下发命令"""
+def send_remote_command(device_id: str, command: str, data: Optional[str] = "", cmd_id: Optional[str] = None) -> dict:
+    """通过 cloud 网关的 HTTP 接口下发命令
+
+    支持可选的 `cmd_id` 字段，网关收到后会把该 id 透传到设备，设备回报时带回，网关会回调 control-plane 的 /commands/callback
+    """
     url = settings.gateway_url.rstrip("/") + "/api/send"
     payload = {"device_id": device_id, "command": command, "data": data}
+    if cmd_id:
+        payload["cmd_id"] = cmd_id
     resp = requests.post(url, json=payload, timeout=5)
     resp.raise_for_status()
     return {"status": "ok"}

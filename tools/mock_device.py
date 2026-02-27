@@ -14,6 +14,7 @@ def simulate_elevator(device_id, token): # 增加 token 参数
     # 动态拼接：使用传入的 ID 和 Token，不要硬编码
     ws_url = f"{GATEWAY_URL}?device_id={device_id}&token={token}"
     
+    import os
     def on_message(ws, message):
         data = json.loads(message)
         
@@ -36,7 +37,7 @@ def simulate_elevator(device_id, token): # 增加 token 参数
             
             # 读取本地图片逻辑（保持不变）
             try:
-                with open("test_snapshot.jpg", "rb") as f:
+                with open(r"D:\adver_system\elevator-ad-platform\data\test_snapshot.jpg", "rb") as f:
                     img_bytes = f.read()
                 img_b64 = base64.b64encode(img_bytes).decode("utf-8")
             except FileNotFoundError:
@@ -116,7 +117,7 @@ if __name__ == "__main__":
     # --- 关键：在这里填入 Postman /register 接口给你的信息 ---
     # 你可以填多组，模拟多台真实注册过的设备
     my_real_devices = [
-        {"id": "ELEVATOR_53D246", "token": "sk_15b3acb1b0b84b01be6c7085e1271837"},
+        {"id": "ELEV_001", "token": "sk_15b3acb1b0b84b01be6c7085e1271837"},
         # 如果有第二台，接着写：
         # {"id": "dev_xyz789", "token": "tok_999999"}
     ]
