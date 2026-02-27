@@ -87,7 +87,9 @@ MATERIAL_DIR = Path("data/materials")
 INDEX_PATH = MATERIAL_DIR / "index.json"
 
 MaterialStatus = Literal["uploaded", "transcoding", "done", "failed"]
-_LOCK = threading.Lock()
+# update_material_status() acquires _LOCK and calls upsert_material(),
+# which also acquires _LOCK. Use a re-entrant lock to avoid deadlock.
+_LOCK = threading.RLock()
 
 ALLOWED_TRANSITIONS = {
     "uploaded": {"transcoding", "failed"},

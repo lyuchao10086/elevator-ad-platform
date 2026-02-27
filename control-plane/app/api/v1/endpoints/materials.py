@@ -251,34 +251,3 @@ def download_material_file(material_id: str):
         filename=download_name,
         media_type="application/octet_stream",
     )
-# @router.patch("/{material_id}/status", response_model=MaterialMeta)
-# def patch_material_status(material_id: str, body: MaterialStatusPatchRequest):
-#     try:
-#         return update_material_status(material_id, body.status)
-#     except KeyError:
-#         raise HTTPException(status_code=404, detail="material not found")
-#     except ValueError as e:
-#         raise HTTPException(status_code=400, detail=str(e))
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @router.post("/{material_id}/transcode/callback", response_model=MaterialMeta)
-# def transcode_callback(material_id: str, body: MaterialTranscodeCallbackRequest):
-#     try:
-#         payload = body.model_dump() if hasattr(body, "model_dump") else body.dict()
-#         return apply_transcode_callback(material_id, payload)
-#     except KeyError:
-#         raise HTTPException(status_code=404, detail="material not found")
-#     except ValueError as e:
-#         raise HTTPException(status_code=400, detail=str(e))
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-@router.delete("/{material_id}")
-def delete_one_material(material_id: str):
-    try:
-        delete_material(material_id)
-        return {"ok": True}
-    except KeyError:
-        raise HTTPException(status_code=404, detail="material not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
