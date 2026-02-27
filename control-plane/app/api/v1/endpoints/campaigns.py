@@ -1,15 +1,21 @@
-from fastapi import APIRouter
-from app.schemas.campaign import CampaignStrategyRequest, CampaignStrategyResponse
-from typing import Optional
+import re
 import uuid
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, HTTPException
+from app.schemas.campaigns import (
+    CampaignListResponse,
+    CampaignMeta,
+    CampaignStrategyRequest,
+    CampaignStrategyResponse,
+    ScheduleConfig,
+)
+from app.services import db_service
 
 router = APIRouter()
 
-from typing import List, Dict, Any
-from app.services import db_service
-from app.schemas.campaign import CampaignListResponse, CampaignMeta
-from fastapi import HTTPException
+_SLOT_PATTERN = re.compile(r"^(?:\*|(?:[01]\d|2[0-3]):[0-5]\d-(?:[01]\d|2[0-3]):[0-5]\d)$")
 
 def dt(v: Optional[datetime]):
     return v.isoformat() if isinstance(v, datetime) else None
@@ -18,14 +24,34 @@ def dt(v: Optional[datetime]):
 @router.post("/strategy", response_model=CampaignStrategyResponse)
 def create_campaign_strategy(payload: CampaignStrategyRequest):
     schedule_id = f"sch_{uuid.uuid4().hex[:8]}"
+    version = datetime.utcnow().strftime("%Y%m%d") + "_v1"
 
-    schedule_config = {
-        "schedule_id": schedule_id,
-        "generated_at": datetime.utcnow().isoformat() + "Z",
-        "ads": payload.ads_list,
-        "devices": payload.devices_list,
-        "time_rules": payload.time_rules,
-    }
+    for ad in payload.ads_list:
+        invalid_slots = [s for s in ad.slots if not _SLOT_PATTERN.fullmatch(s)]
+        if invalid_slots:
+            raise HTTPException(
+                status_code=400,
+                detail=f"invalid slots for ad {ad.id}: {invalid_slots}",
+            )
+
+    download_base_url = payload.download_base_url or payload.time_rules.get("download_base_url")
+    if not download_base_url:
+        download_base_url = "https://oss.aliyun.com/ads/"
+
+    schedule_config = ScheduleConfig(
+        version=version,
+        download_base_url=download_base_url,
+        playlist=[
+            {
+                "id": ad.id,
+                "file": ad.file,
+                "md5": ad.md5,
+                "priority": ad.priority,
+                "slots": ad.slots,
+            }
+            for ad in payload.ads_list
+        ],
+    )
 
     return CampaignStrategyResponse(
         schedule_id=schedule_id,

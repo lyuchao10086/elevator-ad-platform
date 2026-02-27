@@ -1,18 +1,40 @@
 from pydantic import BaseModel
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Literal, Optional
 from datetime import datetime
 
+
+class CampaignAdItem(BaseModel):
+    id: str
+    file: str
+    md5: str
+    priority: int
+    slots: List[str]
+
+
+class SchedulePlaylistItem(BaseModel):
+    id: str
+    file: str
+    md5: str
+    priority: int
+    slots: List[str]
+
+
+class ScheduleConfig(BaseModel):
+    type: Literal["schedule_update"] = "schedule_update"
+    version: str
+    download_base_url: str
+    playlist: List[SchedulePlaylistItem]
+
+
 class CampaignStrategyRequest(BaseModel):
-    ads_list: List[Dict[str, Any]]
+    ads_list: List[CampaignAdItem]
     devices_list: List[str]
     time_rules: Dict[str, Any]
+    download_base_url: Optional[str] = None
 
 class CampaignStrategyResponse(BaseModel):
     schedule_id: str
-    schedule_config: Dict[str, Any]
-
-
-from typing import Optional
+    schedule_config: ScheduleConfig
 
 
 class CampaignMeta(BaseModel):
