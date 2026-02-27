@@ -1,5 +1,6 @@
 import re
 import uuid
+import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -11,10 +12,12 @@ from app.schemas.campaigns import (
     ScheduleConfig,
 )
 from app.services import db_service
+from app.services.device_snapshot_service import send_remote_command
 
 router = APIRouter()
 
 _SLOT_PATTERN = re.compile(r"^(?:\*|(?:[01]\d|2[0-3]):[0-5]\d-(?:[01]\d|2[0-3]):[0-5]\d)$")
+# In-memory fallback to keep local integration usable when Postgres is unavailable.
 _CAMPAIGN_STORE: Dict[str, Dict[str, Any]] = {}
 
 
@@ -74,10 +77,11 @@ def create_campaign_strategy(payload: CampaignStrategyRequest):
 
     persisted = False
     try:
+        # Persist draft for publish/list/get lifecycle.
         db_service.insert_campaign(campaign_row)
         persisted = True
     except Exception:
-        # DB is optional for local integration tests.
+        # DB is optional for local integration tests; keep memory copy as fallback.
         persisted = False
     _CAMPAIGN_STORE[campaign_id] = campaign_row
 
@@ -98,6 +102,7 @@ def list_campaigns(limit: int = 100, offset: int = 0):
         rows = None
 
     if rows is None:
+        # Fallback path used in local dev when DB is not configured.
         mem_items = list(_CAMPAIGN_STORE.values())
         items = []
         for r in mem_items[offset:offset + limit]:
@@ -159,6 +164,51 @@ def publish_campaign(campaign_id: str):
     except Exception:
         updated = 0
 
-    if updated <= 0 and not mem:
+    campaign = mem
+    if not campaign:
+        try:
+            campaign = db_service.get_campaign(campaign_id)
+        except Exception:
+            campaign = None
+    if not campaign:
         return {"ok": False, "updated": updated, "message": "campaign not found"}
-    return {"ok": True, "updated": updated}
+
+    schedule_json = campaign.get("schedule_json")
+    # schedule_json may be stored as text in DB; normalize to dict before push.
+    if isinstance(schedule_json, str):
+        try:
+            schedule_json = json.loads(schedule_json)
+        except Exception:
+            schedule_json = None
+    if not isinstance(schedule_json, dict):
+        return {"ok": False, "updated": updated, "message": "invalid schedule_json"}
+
+    target_devices = campaign.get("target_device_groups") or []
+    # Accept legacy storage style: single device string.
+    if isinstance(target_devices, str):
+        target_devices = [target_devices]
+    if not isinstance(target_devices, list):
+        target_devices = []
+    target_devices = [d for d in target_devices if isinstance(d, str) and d.strip()]
+    if not target_devices:
+        return {"ok": False, "updated": updated, "message": "no target devices"}
+
+    push_result = []
+    success_count = 0
+    for did in target_devices:
+        try:
+            # Reuse gateway command channel for schedule delivery.
+            send_remote_command(did, "UPDATE_SCHEDULE", schedule_json)
+            push_result.append({"device_id": did, "ok": True})
+            success_count += 1
+        except Exception as e:
+            push_result.append({"device_id": did, "ok": False, "error": str(e)})
+
+    ok = success_count > 0
+    return {
+        "ok": ok,
+        "updated": updated,
+        "pushed": success_count,
+        "total": len(target_devices),
+        "results": push_result,
+    }
