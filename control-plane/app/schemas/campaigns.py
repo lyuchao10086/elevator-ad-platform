@@ -33,6 +33,9 @@ class CampaignStrategyRequest(BaseModel):
     download_base_url: Optional[str] = None
 
 class CampaignStrategyResponse(BaseModel):
+    campaign_id: str
+    campaign_status: Literal["draft", "published"]
+    persisted: bool = False
     schedule_id: str
     schedule_config: ScheduleConfig
 
