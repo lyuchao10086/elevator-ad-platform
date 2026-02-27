@@ -1,7 +1,7 @@
 import asyncio
 import uuid
 import os
-from typing import Optional
+from typing import Any, Optional
 import requests
 from app.core.config import settings
 
@@ -15,6 +15,8 @@ def send_remote_command(device_id: str, command: str, data: Optional[str] = "", 
     支持可选的 `cmd_id` 字段，网关收到后会把该 id 透传到设备，设备回报时带回，网关会回调 control-plane 的 /commands/callback
     """
     url = settings.gateway_url.rstrip("/") + "/api/send"
+    # `data` intentionally accepts both string and object payloads
+    # (e.g. snapshot params or schedule JSON).
     payload = {"device_id": device_id, "command": command, "data": data}
     if cmd_id:
         payload["cmd_id"] = cmd_id

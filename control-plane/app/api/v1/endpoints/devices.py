@@ -98,3 +98,28 @@ def list_devices(q: str = None, page: int = 1, page_size: int = 20):
         return {"total": total, "items": items}
     except Exception as e:
         return {"total": 0, "items": [], "error": str(e)}
+# ... 你原有的代码 (rdb, register_device 等) ...
+
+# --- 在文件末尾添加这个函数 ---
+@router.get("") # 这样就对应了 /api/v1/devices
+def get_device_list():
+    """
+    不再写死 ID。
+    当 mock_device.py 运行并注册后，Redis 里会有 auth:ELEVATOR_XXXX。
+    我们动态把它们查出来。
+    """
+    keys = rdb.keys("auth:*")
+    items = []
+    for k in keys:
+        d_id = k.split(":")[-1]
+        items.append({
+            "device_id": d_id,
+            "name": f"电梯_{d_id[-4:]}",
+            "status": "online",
+            "firmware_version": "v1.0.1"
+        })
+    # return {"items": items, "total": len(items)}
+    return {
+            "items": items, 
+            "total": len(items)
+        }

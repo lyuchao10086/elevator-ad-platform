@@ -257,6 +257,51 @@ def update_campaign_status(campaign_id: str, status: str):
     finally:
         conn.close()
 
+def insert_campaign(meta: dict):
+    """
+    Insert or update a campaign record into Postgres campaigns table.
+    Compatible with partial schemas by introspecting existing columns.
+    """
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'campaigns'")
+        cols = {r[0] for r in cur.fetchall()}
+
+        if 'campaign_id' not in cols:
+            raise RuntimeError('campaigns table does not have campaign_id column')
+
+        candidates = [
+            'campaign_id', 'name', 'creator_id', 'status', 'schedule_json',
+            'target_device_groups', 'start_at', 'end_at', 'version',
+            'created_at', 'updated_at'
+        ]
+        use_cols = [c for c in candidates if c in cols]
+        if 'updated_at' in use_cols and meta.get('updated_at') is None and meta.get('created_at') is not None:
+            meta['updated_at'] = meta.get('created_at')
+
+        values = []
+        for c in use_cols:
+            v = meta.get(c)
+            if c in ('schedule_json', 'target_device_groups'):
+                values.append(Json(v) if v is not None else None)
+            else:
+                values.append(v)
+
+        placeholders = ','.join(['%s'] * len(use_cols))
+        col_list = ','.join(use_cols)
+        update_cols = [c for c in use_cols if c != 'campaign_id']
+        if update_cols:
+            update_clause = ','.join([f"{c}=EXCLUDED.{c}" for c in update_cols])
+            sql = f"INSERT INTO campaigns ({col_list}) VALUES ({placeholders}) ON CONFLICT (campaign_id) DO UPDATE SET {update_clause}"
+        else:
+            sql = f"INSERT INTO campaigns ({col_list}) VALUES ({placeholders}) ON CONFLICT (campaign_id) DO NOTHING"
+
+        cur.execute(sql, values)
+        conn.commit()
+    finally:
+        conn.close()
+
 
 def insert_device(device_id: str, location: str = None, status: str = "online") -> None:
     conn = get_conn()
