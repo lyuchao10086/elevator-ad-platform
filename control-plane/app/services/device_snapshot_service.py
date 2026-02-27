@@ -1,7 +1,7 @@
 import asyncio
 import uuid
 import os
-from typing import Optional
+from typing import Any, Optional
 import requests
 from app.core.config import settings
 
@@ -9,9 +9,11 @@ from app.core.config import settings
 _waiters = {}
 # 注意：在混合使用同步和异步时，我们直接用字典，依靠主线程的 call_soon_threadsafe 保证安全
 
-def send_remote_command(device_id: str, command: str, data: Optional[str] = "") -> dict:
+def send_remote_command(device_id: str, command: str, data: Any = "") -> dict:
     """通过 cloud 网关的 HTTP 接口下发命令"""
     url = settings.gateway_url.rstrip("/") + "/api/send"
+    # `data` intentionally accepts both string and object payloads
+    # (e.g. snapshot params or schedule JSON).
     payload = {"device_id": device_id, "command": command, "data": data}
     resp = requests.post(url, json=payload, timeout=5)
     resp.raise_for_status()
