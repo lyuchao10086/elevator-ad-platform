@@ -1,0 +1,98 @@
+[
+{
+  "directory": "/Users/lyuchao/Documents/trae_projects/schedule/build",
+  "command": "/usr/bin/clang++  -I/Users/lyuchao/Documents/trae_projects/schedule/include -g -std=gnu++17 -arch arm64 -o CMakeFiles/schedule_app.dir/src/main.cpp.o -c /Users/lyuchao/Documents/trae_projects/schedule/src/main.cpp",
+  "file": "/Users/lyuchao/Documents/trae_projects/schedule/src/main.cpp",
+  "output": "CMakeFiles/schedule_app.dir/src/main.cpp.o"
+},
+{
+  "directory": "/Users/lyuchao/Documents/trae_projects/schedule/build",
+  "command": "/usr/bin/clang++  -I/Users/lyuchao/Documents/trae_projects/schedule/include -g -std=gnu++17 -arch arm64 -o CMakeFiles/schedule_app.dir/src/Database.cpp.o -c /Users/lyuchao/Documents/trae_projects/schedule/src/Database.cpp",
+  "file": "/Users/lyuchao/Documents/trae_projects/schedule/src/Database.cpp",
+  "output": "CMakeFiles/schedule_app.dir/src/Database.cpp.o"
+},
+{
+  "directory": "/Users/lyuchao/Documents/trae_projects/schedule/build",
+  "command": "/usr/bin/clang++  -I/Users/lyuchao/Documents/trae_projects/schedule/include -g -std=gnu++17 -arch arm64 -o CMakeFiles/schedule_app.dir/src/ScheduleManager.cpp.o -c /Users/lyuchao/Documents/trae_projects/schedule/src/ScheduleManager.cpp",
+  "file": "/Users/lyuchao/Documents/trae_projects/schedule/src/ScheduleManager.cpp",
+  "output": "CMakeFiles/schedule_app.dir/src/ScheduleManager.cpp.o"
+},
+{
+  "directory": "/Users/lyuchao/Documents/trae_projects/schedule/build",
+  "command": "/usr/bin/clang++  -I/Users/lyuchao/Documents/trae_projects/schedule/include -g -std=gnu++17 -arch arm64 -o CMakeFiles/schedule_app.dir/src/models/Asset.cpp.o -c /Users/lyuchao/Documents/trae_projects/schedule/src/models/Asset.cpp",
+  "file": "/Users/lyuchao/Documents/trae_projects/schedule/src/models/Asset.cpp",
+  "output": "CMakeFiles/schedule_app.dir/src/models/Asset.cpp.o"
+},
+{
+  "directory": "/Users/lyuchao/Documents/trae_projects/schedule/build",
+  "command": "/usr/bin/clang++  -I/Users/lyuchao/Documents/trae_projects/schedule/include -g -std=gnu++17 -arch arm64 -o CMakeFiles/schedule_app.dir/src/models/Schedule.cpp.o -c /Users/lyuchao/Documents/trae_projects/schedule/src/models/Schedule.cpp",
+  "file": "/Users/lyuchao/Documents/trae_projects/schedule/src/models/Schedule.cpp",
+  "output": "CMakeFiles/schedule_app.dir/src/models/Schedule.cpp.o"
+},
+{
+  "directory": "/Users/lyuchao/Documents/trae_projects/schedule/build",
+  "command": "/usr/bin/clang++  -I/Users/lyuchao/Documents/trae_projects/schedule/include -g -std=gnu++17 -arch arm64 -o CMakeFiles/schedule_app.dir/src/models/Interrupt.cpp.o -c /Users/lyuchao/Documents/trae_projects/schedule/src/models/Interrupt.cpp",
+  "file": "/Users/lyuchao/Documents/trae_projects/schedule/src/models/Interrupt.cpp",
+  "output": "CMakeFiles/schedule_app.dir/src/models/Interrupt.cpp.o"
+},
+{
+  "directory": "/Users/lyuchao/Documents/trae_projects/schedule/build",
+  "command": "/usr/bin/clang++  -I/Users/lyuchao/Documents/trae_projects/schedule/include -g -std=gnu++17 -arch arm64 -o CMakeFiles/schedule_app.dir/src/models/TimeSlot.cpp.o -c /Users/lyuchao/Documents/trae_projects/schedule/src/models/TimeSlot.cpp",
+  "file": "/Users/lyuchao/Documents/trae_projects/schedule/src/models/TimeSlot.cpp",
+  "output": "CMakeFiles/schedule_app.dir/src/models/TimeSlot.cpp.o"
+},
+{
+  "directory": "/Users/lyuchao/Documents/trae_projects/schedule/build",
+  "command": "/usr/bin/clang++  -I/Users/lyuchao/Documents/trae_projects/schedule/include -g -std=gnu++17 -arch arm64 -o CMakeFiles/schedule_app.dir/src/models/PlayItem.cpp.o -c /Users/lyuchao/Documents/trae_projects/schedule/src/models/PlayItem.cpp",
+  "file": "/Users/lyuchao/Documents/trae_projects/schedule/src/models/PlayItem.cpp",
+  "output": "CMakeFiles/schedule_app.dir/src/models/PlayItem.cpp.o"
+},
+{
+  "directory": "/Users/lyuchao/Documents/trae_projects/schedule/build",
+  "command": "/usr/bin/clang++  -I/Users/lyuchao/Documents/trae_projects/schedule/include -g -std=gnu++17 -arch arm64 -o CMakeFiles/schedule_test.dir/src/test.cpp.o -c /Users/lyuchao/Documents/trae_projects/schedule/src/test.cpp",
+  "file": "/Users/lyuchao/Documents/trae_projects/schedule/src/test.cpp",
+  "output": "CMakeFiles/schedule_test.dir/src/test.cpp.o"
+},
+{
+  "directory": "/Users/lyuchao/Documents/trae_projects/schedule/build",
+  "command": "/usr/bin/clang++  -I/Users/lyuchao/Documents/trae_projects/schedule/include -g -std=gnu++17 -arch arm64 -o CMakeFiles/schedule_test.dir/src/Database.cpp.o -c /Users/lyuchao/Documents/trae_projects/schedule/src/Database.cpp",
+  "file": "/Users/lyuchao/Documents/trae_projects/schedule/src/Database.cpp",
+  "output": "CMakeFiles/schedule_test.dir/src/Database.cpp.o"
+},
+{
+  "directory": "/Users/lyuchao/Documents/trae_projects/schedule/build",
+  "command": "/usr/bin/clang++  -I/Users/lyuchao/Documents/trae_projects/schedule/include -g -std=gnu++17 -arch arm64 -o CMakeFiles/schedule_test.dir/src/ScheduleManager.cpp.o -c /Users/lyuchao/Documents/trae_projects/schedule/src/ScheduleManager.cpp",
+  "file": "/Users/lyuchao/Documents/trae_projects/schedule/src/ScheduleManager.cpp",
+  "output": "CMakeFiles/schedule_test.dir/src/ScheduleManager.cpp.o"
+},
+{
+  "directory": "/Users/lyuchao/Documents/trae_projects/schedule/build",
+  "command": "/usr/bin/clang++  -I/Users/lyuchao/Documents/trae_projects/schedule/include -g -std=gnu++17 -arch arm64 -o CMakeFiles/schedule_test.dir/src/models/Asset.cpp.o -c /Users/lyuchao/Documents/trae_projects/schedule/src/models/Asset.cpp",
+  "file": "/Users/lyuchao/Documents/trae_projects/schedule/src/models/Asset.cpp",
+  "output": "CMakeFiles/schedule_test.dir/src/models/Asset.cpp.o"
+},
+{
+  "directory": "/Users/lyuchao/Documents/trae_projects/schedule/build",
+  "command": "/usr/bin/clang++  -I/Users/lyuchao/Documents/trae_projects/schedule/include -g -std=gnu++17 -arch arm64 -o CMakeFiles/schedule_test.dir/src/models/Schedule.cpp.o -c /Users/lyuchao/Documents/trae_projects/schedule/src/models/Schedule.cpp",
+  "file": "/Users/lyuchao/Documents/trae_projects/schedule/src/models/Schedule.cpp",
+  "output": "CMakeFiles/schedule_test.dir/src/models/Schedule.cpp.o"
+},
+{
+  "directory": "/Users/lyuchao/Documents/trae_projects/schedule/build",
+  "command": "/usr/bin/clang++  -I/Users/lyuchao/Documents/trae_projects/schedule/include -g -std=gnu++17 -arch arm64 -o CMakeFiles/schedule_test.dir/src/models/Interrupt.cpp.o -c /Users/lyuchao/Documents/trae_projects/schedule/src/models/Interrupt.cpp",
+  "file": "/Users/lyuchao/Documents/trae_projects/schedule/src/models/Interrupt.cpp",
+  "output": "CMakeFiles/schedule_test.dir/src/models/Interrupt.cpp.o"
+},
+{
+  "directory": "/Users/lyuchao/Documents/trae_projects/schedule/build",
+  "command": "/usr/bin/clang++  -I/Users/lyuchao/Documents/trae_projects/schedule/include -g -std=gnu++17 -arch arm64 -o CMakeFiles/schedule_test.dir/src/models/TimeSlot.cpp.o -c /Users/lyuchao/Documents/trae_projects/schedule/src/models/TimeSlot.cpp",
+  "file": "/Users/lyuchao/Documents/trae_projects/schedule/src/models/TimeSlot.cpp",
+  "output": "CMakeFiles/schedule_test.dir/src/models/TimeSlot.cpp.o"
+},
+{
+  "directory": "/Users/lyuchao/Documents/trae_projects/schedule/build",
+  "command": "/usr/bin/clang++  -I/Users/lyuchao/Documents/trae_projects/schedule/include -g -std=gnu++17 -arch arm64 -o CMakeFiles/schedule_test.dir/src/models/PlayItem.cpp.o -c /Users/lyuchao/Documents/trae_projects/schedule/src/models/PlayItem.cpp",
+  "file": "/Users/lyuchao/Documents/trae_projects/schedule/src/models/PlayItem.cpp",
+  "output": "CMakeFiles/schedule_test.dir/src/models/PlayItem.cpp.o"
+}
+]
