@@ -4,6 +4,10 @@ from flask import Flask, request, jsonify
 import requests
 import threading
 import time
+import redis
+# 连接 Redis
+r = redis.Redis(host='127.0.0.1', port=6379, db=0, decode_responses=True)
+
 #向GO网关发送指令
 def push_command_to_elevator(device_id, command_type, extra_data):
     # 网关的snapshot请求接口地址 (对应你 main.go 里的 /api/send)
@@ -94,7 +98,7 @@ def snapshot_callback():
 # 监听设备在线/掉线线程
 def run_flask():
     print("[Python] 后端启动，监听设备状态变化...")
-    app.run(port=5000)
+    app.run(port=8000)
 
 #向设备发起截图请求进程
 def business_logic():
@@ -108,7 +112,37 @@ def business_logic():
     #     }
     # )
     request_remote_snapshot("ELEVATOR_53D246")
+#读取日志
+def consume_stream():
+    stream_name = "play_log_stream"
+    group_name = "cloud_group"
+    consumer_name = "consumer_1"
 
+    while True:
+        # 从消费组读取消息
+        resp = r.xreadgroup(
+            groupname=group_name,
+            consumername=consumer_name,
+            streams={stream_name: '>'},  # '>' 表示只读取尚未被消费的消息
+            count=10,
+            block=5000
+        )
+
+        if not resp:
+            continue
+
+        for stream, messages in resp:
+            for msg_id, msg_data in messages:
+                # 解析 JSON
+                for k, v in msg_data.items():
+                    try:
+                        msg_data[k] = json.loads(v)
+                    except:
+                        pass
+                print(f"消费到日志 {msg_id}: {msg_data}")
+
+                # 处理完成后确认消息
+                r.xack(stream_name, group_name, msg_id)
 if __name__ == "__main__":
     # 测试案例 1：让 001 号电梯重启
     #push_command_to_elevator("ELEVATOR_SH_001", "REBOOT", "force=true")
@@ -121,12 +155,15 @@ if __name__ == "__main__":
     # push_command_to_elevator("ELEVATOR_SH_002", "UPDATE_PLAYLIST", "url=http://cdn.com/v2.json")
     
     # 测试案例 3： 让 001 号电梯设备截图
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
+    # flask_thread = threading.Thread(target=run_flask, daemon=True)
+    # flask_thread.start()
 
-    business_thread = threading.Thread(target=business_logic, daemon=True)
-    business_thread.start()
+    # business_thread = threading.Thread(target=business_logic, daemon=True)
+    # business_thread.start()
 
+    # 测试案例 4 ：读取日志消息
+    consumer_thread = threading.Thread(target=consume_stream, daemon=True)
+    consumer_thread.start()
     # 防止主线程退出
     while True:
         time.sleep(1)

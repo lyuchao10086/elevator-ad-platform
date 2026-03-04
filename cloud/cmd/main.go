@@ -29,6 +29,9 @@ func main() {
 	// ✅ 在程序启动时初始化 OSS
 	bucket := gateway.InitOSSBucket()
 
+	// // ⭐ 初始化 Kafka（新增）
+	// kafkaProducer := gateway.InitKafkaProducer()
+
 	handler := gateway.NewHandler(mgr, bucket)
 
 	// --- 接口清单 ---

@@ -24,6 +24,7 @@ import (
 // DeviceSession 包装连接和它的状态
 type DeviceSession struct {
 	Conn       *websocket.Conn
+	ClientIP   string    // ⭐ 设备 IP
 	LastActive time.Time // 记录最后一次心跳的时间
 }
 
@@ -94,15 +95,16 @@ func NewDeviceManager() *DeviceManager {
 // Register 改为存储 Session
 // 修改 Register：在注册成功后发送上线通知
 // Register 设备上线
-func (m *DeviceManager) Register(deviceID string, conn *websocket.Conn) {
+func (m *DeviceManager) Register(deviceID string, conn *websocket.Conn, clientIP string) {
 	m.lock.Lock()
 	m.connections[deviceID] = &DeviceSession{
 		Conn:       conn,
 		LastActive: time.Now(),
+		ClientIP:   clientIP,
 	}
 	m.lock.Unlock()
 
-	log.Printf("[Manager] 设备 %s 注册成功", deviceID)
+	log.Printf("[Manager] 设备 %s 注册成功 ip=%s", deviceID, clientIP)
 
 	// --- 新增：写入 Redis (关键步骤) ---
 	// 逻辑：设置 key="device:online:123"，value="1"，过期时间=60秒
@@ -266,10 +268,10 @@ func (m *DeviceManager) NotifyCommandCallback(deviceID, cmdID, status, info stri
 func (h *Handler) notifyPython(deviceID, reqID, snapshotURL string) {
 	callback := os.Getenv("CONTROL_PLANE_SNAPSHOT_CALLBACK")
 	if callback == "" {
-		// callback = "http://127.0.0.1:5000/api/v1/devices/snapshot/callback"
+		// callback = "http://127.0.0.1:8000/api/v1/devices/snapshot/callback"
 		callback = "http://127.0.0.1:8000/api/v1/devices/remote/snapshot/callback"
 	}
-	// callback = "http://127.0.0.1:5000/api/v1/devices/remote/snapshot/callback"
+	// callback = "http://127.0.0.1:8000/api/v1/devices/remote/snapshot/callback"
 	body := map[string]string{
 		"device_id":    deviceID,
 		"req_id":       reqID,
@@ -331,4 +333,15 @@ func (m *DeviceManager) CheckAuth(deviceID, token string) bool {
 	}
 
 	return savedToken == token
+}
+
+// 日志用：获取终端设备IP
+func (m *DeviceManager) GetDeviceIP(deviceID string) string {
+	m.lock.RLock()
+	defer m.lock.RUnlock()
+
+	if session, ok := m.connections[deviceID]; ok {
+		return session.ClientIP
+	}
+	return ""
 }

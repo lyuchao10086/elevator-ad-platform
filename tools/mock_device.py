@@ -90,7 +90,15 @@ def simulate_elevator(device_id, token): # 增加 token 参数
                     if random.random() > 0.7:  # 模拟随机产生日志
                         log_data = {
                             "type": "log",
-                            "payload": f"Device {device_id} is playing Ad_Video_{random.randint(100, 999)}.mp4"
+                            "payload": {
+                                "log_id": "log_10001",
+                                "ad_id": "ad_888",
+                                "playback_info": {
+                                    "duration_ms": 15000,
+                                    "status_code": 0
+                                },
+                                "meta": {}
+                            }
                         }
                         ws.send(json.dumps(log_data))
                         print(f"[{device_id}] 已上报播放日志")
