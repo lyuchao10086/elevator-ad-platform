@@ -181,3 +181,74 @@ def test_retry_failed_returns_502_when_gateway_delivery_fails(client, monkeypatc
     assert detail["message"] == "gateway retry delivery failed"
     assert detail["batch_id"].startswith("pub_")
     assert len(detail["results"]) == 1
+
+
+def test_publish_is_idempotent_after_success(client, monkeypatch):
+    campaign_id = _create_campaign(client)
+
+    call_count = {"n": 0}
+
+    def _ok_send(*_args, **_kwargs):
+        call_count["n"] += 1
+
+    monkeypatch.setattr(campaigns_ep.db_service, "update_campaign_status", lambda *_args, **_kwargs: 1)
+    monkeypatch.setattr(campaigns_ep.db_service, "get_existing_device_ids", lambda ids: ids)
+    monkeypatch.setattr(campaigns_ep.db_service, "get_existing_material_ids", lambda ids: ids)
+    monkeypatch.setattr(campaigns_ep.db_service, "insert_campaign_publish_logs", lambda **kwargs: len(kwargs["results"]))
+    monkeypatch.setattr(
+        campaigns_ep.db_service,
+        "list_campaign_publish_logs",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("db down")),
+    )
+    monkeypatch.setattr(campaigns_ep, "send_remote_command", _ok_send)
+
+    first = client.post(f"/api/v1/campaigns/{campaign_id}/publish")
+    assert first.status_code == 200
+    assert first.json().get("idempotent") in (None, False)
+
+    second = client.post(f"/api/v1/campaigns/{campaign_id}/publish")
+    assert second.status_code == 200
+    body = second.json()
+    assert body["idempotent"] is True
+    assert body["message"] == "already published for current version and target devices"
+    # Only the first publish should invoke gateway calls (2 devices).
+    assert call_count["n"] == 2
+
+
+def test_rollback_publish_now_is_idempotent_after_success(client, monkeypatch):
+    campaign_id = _create_campaign(client)
+    versions_resp = client.get(f"/api/v1/campaigns/{campaign_id}/versions")
+    version = versions_resp.json()["items"][0]["version"]
+
+    call_count = {"n": 0}
+
+    def _ok_send(*_args, **_kwargs):
+        call_count["n"] += 1
+
+    monkeypatch.setattr(campaigns_ep.db_service, "get_campaign_version", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(campaigns_ep.db_service, "insert_campaign", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(campaigns_ep.db_service, "get_existing_device_ids", lambda ids: ids)
+    monkeypatch.setattr(campaigns_ep.db_service, "get_existing_material_ids", lambda ids: ids)
+    monkeypatch.setattr(campaigns_ep.db_service, "insert_campaign_publish_logs", lambda **kwargs: len(kwargs["results"]))
+    monkeypatch.setattr(
+        campaigns_ep.db_service,
+        "list_campaign_publish_logs",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("db down")),
+    )
+    monkeypatch.setattr(campaigns_ep, "send_remote_command", _ok_send)
+
+    first = client.post(
+        f"/api/v1/campaigns/{campaign_id}/rollback",
+        json={"version": version, "publish_now": True},
+    )
+    assert first.status_code == 200
+
+    second = client.post(
+        f"/api/v1/campaigns/{campaign_id}/rollback",
+        json={"version": version, "publish_now": True},
+    )
+    assert second.status_code == 200
+    body = second.json()
+    assert body["idempotent"] is True
+    assert body["message"] == "rollback version already published to target devices"
+    assert call_count["n"] == 2

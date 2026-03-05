@@ -23,6 +23,7 @@ _SLOT_PATTERN = re.compile(r"^(?:\*|(?:[01]\d|2[0-3]):[0-5]\d-(?:[01]\d|2[0-3]):
 # In-memory fallback to keep local integration usable when Postgres is unavailable.
 _CAMPAIGN_STORE: Dict[str, Dict[str, Any]] = {}
 _CAMPAIGN_VERSION_STORE: Dict[str, Dict[str, Dict[str, Any]]] = {}
+_PUBLISH_BATCH_STORE: Dict[str, List[Dict[str, Any]]] = {}
 
 
 def dt(v: Optional[datetime]):
@@ -74,6 +75,99 @@ def _all_push_failed(push_summary: Dict[str, Any]) -> bool:
     return push_summary.get("total", 0) > 0 and push_summary.get("pushed", 0) == 0
 
 
+def _normalize_target_devices(raw_devices: Any) -> List[str]:
+    if isinstance(raw_devices, str):
+        raw_devices = [raw_devices]
+    if not isinstance(raw_devices, list):
+        return []
+    # Keep input order while removing duplicates/empties.
+    result: List[str] = []
+    seen = set()
+    for did in raw_devices:
+        if not isinstance(did, str):
+            continue
+        v = did.strip()
+        if not v or v in seen:
+            continue
+        seen.add(v)
+        result.append(v)
+    return result
+
+
+def _record_publish_batch(
+    campaign_id: str,
+    version: str,
+    batch_id: str,
+    results: List[Dict[str, Any]],
+) -> None:
+    if not _fallback_enabled():
+        return
+    _PUBLISH_BATCH_STORE.setdefault(campaign_id, []).append(
+        {
+            "campaign_id": campaign_id,
+            "version": version,
+            "batch_id": batch_id,
+            "results": results,
+            "created_at": datetime.utcnow().isoformat() + "Z",
+        }
+    )
+
+
+def _latest_batch_for_campaign(campaign_id: str) -> Optional[Dict[str, Any]]:
+    try:
+        rows = db_service.list_campaign_publish_logs(campaign_id, limit=500, offset=0)
+    except Exception:
+        rows = None
+
+    if rows:
+        first = rows[0]
+        batch_id = first.get("batch_id")
+        if batch_id:
+            items = [r for r in rows if r.get("batch_id") == batch_id]
+            return {
+                "campaign_id": campaign_id,
+                "version": first.get("version"),
+                "batch_id": batch_id,
+                "results": [
+                    {
+                        "device_id": r.get("device_id"),
+                        "ok": bool(r.get("ok")),
+                        "error": r.get("error"),
+                    }
+                    for r in items
+                ],
+            }
+
+    mem_items = _PUBLISH_BATCH_STORE.get(campaign_id) or []
+    if mem_items:
+        return mem_items[-1]
+    return None
+
+
+def _is_idempotent_success(
+    campaign_id: str,
+    version: str,
+    target_devices: List[str],
+) -> Optional[Dict[str, Any]]:
+    latest = _latest_batch_for_campaign(campaign_id)
+    if not latest:
+        return None
+    if latest.get("version") != version:
+        return None
+
+    result_map = {}
+    for r in latest.get("results") or []:
+        did = r.get("device_id")
+        if isinstance(did, str) and did not in result_map:
+            result_map[did] = r
+
+    if set(target_devices) != set(result_map.keys()):
+        return None
+    if not all(bool(result_map[d].get("ok")) for d in target_devices):
+        return None
+    return latest
+
+
 def _push_schedule_to_devices(
     campaign_id: str,
     version: str,
@@ -102,6 +196,12 @@ def _push_schedule_to_devices(
         )
     except Exception:
         persisted_logs = 0
+    _record_publish_batch(
+        campaign_id=campaign_id,
+        version=version,
+        batch_id=batch_id,
+        results=push_result,
+    )
 
     return {
         "ok": success_count > 0,
@@ -416,13 +516,7 @@ def publish_campaign(campaign_id: str):
         return {"ok": False, "updated": updated, "message": "invalid schedule_json"}
     _save_campaign_version(campaign_id, campaign.get("version"), schedule_json)
 
-    target_devices = campaign.get("target_device_groups") or []
-    # Accept legacy storage style: single device string.
-    if isinstance(target_devices, str):
-        target_devices = [target_devices]
-    if not isinstance(target_devices, list):
-        target_devices = []
-    target_devices = [d for d in target_devices if isinstance(d, str) and d.strip()]
+    target_devices = _normalize_target_devices(campaign.get("target_device_groups") or [])
     validation = _validate_publish_inputs(schedule_json, target_devices)
     if not validation["ok"]:
         raise HTTPException(
@@ -433,6 +527,23 @@ def publish_campaign(campaign_id: str):
                 "warnings": validation["warnings"],
             },
         )
+    latest_ok = _is_idempotent_success(
+        campaign_id=campaign_id,
+        version=campaign.get("version"),
+        target_devices=target_devices,
+    )
+    if latest_ok:
+        return {
+            "ok": True,
+            "updated": updated,
+            "pushed": len(target_devices),
+            "total": len(target_devices),
+            "persisted_logs": 0,
+            "batch_id": latest_ok.get("batch_id"),
+            "results": latest_ok.get("results"),
+            "idempotent": True,
+            "message": "already published for current version and target devices",
+        }
 
     push_summary = _push_schedule_to_devices(
         campaign_id=campaign_id,
@@ -588,12 +699,7 @@ def rollback_campaign(campaign_id: str, body: CampaignRollbackRequest):
     if not body.publish_now:
         return {"ok": True, "campaign_id": campaign_id, "version": version, "published": False}
 
-    target_devices = campaign.get("target_device_groups") or []
-    if isinstance(target_devices, str):
-        target_devices = [target_devices]
-    if not isinstance(target_devices, list):
-        target_devices = []
-    target_devices = [d for d in target_devices if isinstance(d, str) and d.strip()]
+    target_devices = _normalize_target_devices(campaign.get("target_device_groups") or [])
     validation = _validate_publish_inputs(schedule_json, target_devices)
     if not validation["ok"]:
         raise HTTPException(
@@ -604,6 +710,25 @@ def rollback_campaign(campaign_id: str, body: CampaignRollbackRequest):
                 "warnings": validation["warnings"],
             },
         )
+    latest_ok = _is_idempotent_success(
+        campaign_id=campaign_id,
+        version=version,
+        target_devices=target_devices,
+    )
+    if latest_ok:
+        return {
+            "ok": True,
+            "campaign_id": campaign_id,
+            "version": version,
+            "published": True,
+            "pushed": len(target_devices),
+            "total": len(target_devices),
+            "persisted_logs": 0,
+            "batch_id": latest_ok.get("batch_id"),
+            "results": latest_ok.get("results"),
+            "idempotent": True,
+            "message": "rollback version already published to target devices",
+        }
 
     push_summary = _push_schedule_to_devices(
         campaign_id=campaign_id,
