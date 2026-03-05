@@ -79,6 +79,49 @@ def _push_schedule_to_devices(
     }
 
 
+def _validate_publish_inputs(schedule_json: Dict[str, Any], target_devices: List[str]) -> Dict[str, Any]:
+    errors: List[str] = []
+    warnings: List[str] = []
+
+    playlist = schedule_json.get("playlist")
+    if not isinstance(playlist, list) or not playlist:
+        errors.append("playlist is empty")
+        return {"ok": False, "errors": errors, "warnings": warnings}
+
+    for idx, item in enumerate(playlist):
+        if not isinstance(item, dict):
+            errors.append(f"playlist[{idx}] is not an object")
+            continue
+        for key in ("id", "file", "md5"):
+            if not item.get(key):
+                errors.append(f"playlist[{idx}] missing {key}")
+
+    if not target_devices:
+        errors.append("no target devices")
+        return {"ok": False, "errors": errors, "warnings": warnings}
+
+    # DB-backed existence checks (best-effort; no hard fail on DB outage).
+    try:
+        existing_devices = set(db_service.get_existing_device_ids(target_devices))
+        missing_devices = [d for d in target_devices if d not in existing_devices]
+        if missing_devices:
+            errors.append(f"unknown devices: {missing_devices}")
+    except Exception:
+        warnings.append("device existence check skipped (db unavailable)")
+
+    try:
+        ad_ids = [str(i.get("id")) for i in playlist if isinstance(i, dict) and i.get("id")]
+        if ad_ids:
+            existing_materials = set(db_service.get_existing_material_ids(ad_ids))
+            missing_materials = [m for m in ad_ids if m not in existing_materials]
+            if missing_materials:
+                errors.append(f"unknown materials: {missing_materials}")
+    except Exception:
+        warnings.append("material existence check skipped (db unavailable)")
+
+    return {"ok": len(errors) == 0, "errors": errors, "warnings": warnings}
+
+
 def _save_campaign_version(campaign_id: str, version: str, schedule_json: Dict[str, Any]) -> bool:
     if not version:
         return False
@@ -223,6 +266,34 @@ def get_campaign(campaign_id: str):
     return r
 
 
+@router.get("/{campaign_id}/publish-logs")
+def get_campaign_publish_logs(campaign_id: str, limit: int = 100, offset: int = 0):
+    # Ensure campaign exists first.
+    campaign = _CAMPAIGN_STORE.get(campaign_id)
+    if not campaign:
+        try:
+            campaign = db_service.get_campaign(campaign_id)
+        except Exception:
+            campaign = None
+    if not campaign:
+        raise HTTPException(status_code=404, detail="campaign not found")
+
+    try:
+        rows = db_service.list_campaign_publish_logs(campaign_id, limit=limit, offset=offset)
+    except Exception:
+        rows = []
+
+    success = sum(1 for r in rows if r.get("ok") is True)
+    failed = sum(1 for r in rows if r.get("ok") is False)
+    return {
+        "campaign_id": campaign_id,
+        "total": len(rows),
+        "success": success,
+        "failed": failed,
+        "items": rows,
+    }
+
+
 @router.post("/{campaign_id}/publish")
 def publish_campaign(campaign_id: str):
     mem = _CAMPAIGN_STORE.get(campaign_id)
@@ -256,8 +327,15 @@ def publish_campaign(campaign_id: str):
     if not isinstance(target_devices, list):
         target_devices = []
     target_devices = [d for d in target_devices if isinstance(d, str) and d.strip()]
-    if not target_devices:
-        return {"ok": False, "updated": updated, "message": "no target devices"}
+    validation = _validate_publish_inputs(schedule_json, target_devices)
+    if not validation["ok"]:
+        return {
+            "ok": False,
+            "updated": updated,
+            "message": "publish validation failed",
+            "errors": validation["errors"],
+            "warnings": validation["warnings"],
+        }
 
     push_summary = _push_schedule_to_devices(
         campaign_id=campaign_id,
@@ -265,7 +343,7 @@ def publish_campaign(campaign_id: str):
         schedule_json=schedule_json,
         target_devices=target_devices,
     )
-    return {
+    response = {
         "ok": push_summary["ok"],
         "updated": updated,
         "pushed": push_summary["pushed"],
@@ -274,6 +352,9 @@ def publish_campaign(campaign_id: str):
         "batch_id": push_summary["batch_id"],
         "results": push_summary["results"],
     }
+    if validation["warnings"]:
+        response["warnings"] = validation["warnings"]
+    return response
 
 
 @router.get("/{campaign_id}/versions", response_model=CampaignVersionListResponse)
@@ -315,6 +396,14 @@ def retry_failed_devices(campaign_id: str):
     failed_devices = [d for d in failed_devices if isinstance(d, str) and d.strip()]
     if not failed_devices:
         return {"ok": True, "retried": 0, "message": "no failed devices to retry"}
+    validation = _validate_publish_inputs(schedule_json, failed_devices)
+    if not validation["ok"]:
+        return {
+            "ok": False,
+            "message": "retry validation failed",
+            "errors": validation["errors"],
+            "warnings": validation["warnings"],
+        }
 
     push_summary = _push_schedule_to_devices(
         campaign_id=campaign_id,
@@ -322,7 +411,7 @@ def retry_failed_devices(campaign_id: str):
         schedule_json=schedule_json,
         target_devices=failed_devices,
     )
-    return {
+    response = {
         "ok": push_summary["ok"],
         "retried": len(failed_devices),
         "pushed": push_summary["pushed"],
@@ -330,6 +419,9 @@ def retry_failed_devices(campaign_id: str):
         "batch_id": push_summary["batch_id"],
         "results": push_summary["results"],
     }
+    if validation["warnings"]:
+        response["warnings"] = validation["warnings"]
+    return response
 
 
 @router.post("/{campaign_id}/rollback")
@@ -376,8 +468,14 @@ def rollback_campaign(campaign_id: str, body: CampaignRollbackRequest):
     if not isinstance(target_devices, list):
         target_devices = []
     target_devices = [d for d in target_devices if isinstance(d, str) and d.strip()]
-    if not target_devices:
-        return {"ok": False, "message": "no target devices"}
+    validation = _validate_publish_inputs(schedule_json, target_devices)
+    if not validation["ok"]:
+        return {
+            "ok": False,
+            "message": "rollback publish validation failed",
+            "errors": validation["errors"],
+            "warnings": validation["warnings"],
+        }
 
     push_summary = _push_schedule_to_devices(
         campaign_id=campaign_id,
@@ -385,7 +483,7 @@ def rollback_campaign(campaign_id: str, body: CampaignRollbackRequest):
         schedule_json=schedule_json,
         target_devices=target_devices,
     )
-    return {
+    response = {
         "ok": push_summary["ok"],
         "campaign_id": campaign_id,
         "version": version,
@@ -396,3 +494,6 @@ def rollback_campaign(campaign_id: str, body: CampaignRollbackRequest):
         "batch_id": push_summary["batch_id"],
         "results": push_summary["results"],
     }
+    if validation["warnings"]:
+        response["warnings"] = validation["warnings"]
+    return response
