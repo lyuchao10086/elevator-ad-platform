@@ -28,6 +28,31 @@ def dt(v: Optional[datetime]):
     return v.isoformat() if isinstance(v, datetime) else v
 
 
+def _parse_slot_to_range(slot: str) -> Optional[tuple]:
+    if slot == "*":
+        return (0, 24 * 60)
+    if not _SLOT_PATTERN.fullmatch(slot):
+        return None
+    start, end = slot.split("-")
+    sh, sm = start.split(":")
+    eh, em = end.split(":")
+    start_m = int(sh) * 60 + int(sm)
+    end_m = int(eh) * 60 + int(em)
+    if end_m <= start_m:
+        return None
+    return (start_m, end_m)
+
+
+def _has_slot_overlap(ranges: List[tuple]) -> bool:
+    if len(ranges) <= 1:
+        return False
+    ranges = sorted(ranges, key=lambda x: x[0])
+    for i in range(1, len(ranges)):
+        if ranges[i][0] < ranges[i - 1][1]:
+            return True
+    return False
+
+
 def _normalize_schedule_json(schedule_json: Any) -> Optional[Dict[str, Any]]:
     # schedule_json may be stored as text in DB; normalize to dict before push.
     if isinstance(schedule_json, str):
@@ -95,6 +120,37 @@ def _validate_publish_inputs(schedule_json: Dict[str, Any], target_devices: List
         for key in ("id", "file", "md5"):
             if not item.get(key):
                 errors.append(f"playlist[{idx}] missing {key}")
+        priority = item.get("priority")
+        if not isinstance(priority, int) or not (1 <= priority <= 100):
+            errors.append(f"playlist[{idx}] invalid priority: {priority}")
+        slots = item.get("slots")
+        if not isinstance(slots, list) or not slots:
+            errors.append(f"playlist[{idx}] slots is empty")
+            continue
+        slot_ranges = []
+        seen_slots = set()
+        for s in slots:
+            if not isinstance(s, str):
+                errors.append(f"playlist[{idx}] slot is not a string: {s}")
+                continue
+            if s in seen_slots:
+                errors.append(f"playlist[{idx}] duplicated slot: {s}")
+                continue
+            seen_slots.add(s)
+            parsed = _parse_slot_to_range(s)
+            if parsed is None:
+                errors.append(f"playlist[{idx}] invalid slot: {s}")
+                continue
+            if s != "*":
+                slot_ranges.append(parsed)
+        if "*" in seen_slots and len(seen_slots) > 1:
+            errors.append(f"playlist[{idx}] '*' cannot be mixed with other slots")
+        if _has_slot_overlap(slot_ranges):
+            errors.append(f"playlist[{idx}] slots overlap")
+
+    ids = [str(i.get("id")) for i in playlist if isinstance(i, dict) and i.get("id")]
+    if len(ids) != len(set(ids)):
+        errors.append("duplicated ad id in playlist")
 
     if not target_devices:
         errors.append("no target devices")
@@ -144,13 +200,28 @@ def create_campaign_strategy(payload: CampaignStrategyRequest):
     schedule_id = f"sch_{uuid.uuid4().hex[:8]}"
     version = datetime.utcnow().strftime("%Y%m%d") + "_v1"
 
+    ad_ids = [ad.id for ad in payload.ads_list]
+    if len(ad_ids) != len(set(ad_ids)):
+        raise HTTPException(status_code=400, detail="duplicated ad id in ads_list")
+
     for ad in payload.ads_list:
-        invalid_slots = [s for s in ad.slots if not _SLOT_PATTERN.fullmatch(s)]
-        if invalid_slots:
-            raise HTTPException(
-                status_code=400,
-                detail=f"invalid slots for ad {ad.id}: {invalid_slots}",
-            )
+        if not isinstance(ad.priority, int) or not (1 <= ad.priority <= 100):
+            raise HTTPException(status_code=400, detail=f"invalid priority for ad {ad.id}: {ad.priority}")
+        slot_ranges = []
+        seen_slots = set()
+        for s in ad.slots:
+            if s in seen_slots:
+                raise HTTPException(status_code=400, detail=f"duplicated slot for ad {ad.id}: {s}")
+            seen_slots.add(s)
+            parsed = _parse_slot_to_range(s)
+            if parsed is None:
+                raise HTTPException(status_code=400, detail=f"invalid slot for ad {ad.id}: {s}")
+            if s != "*":
+                slot_ranges.append(parsed)
+        if "*" in seen_slots and len(seen_slots) > 1:
+            raise HTTPException(status_code=400, detail=f"'*' cannot mix with other slots for ad {ad.id}")
+        if _has_slot_overlap(slot_ranges):
+            raise HTTPException(status_code=400, detail=f"overlapping slots for ad {ad.id}")
 
     download_base_url = payload.download_base_url or payload.time_rules.get("download_base_url")
     if not download_base_url:
