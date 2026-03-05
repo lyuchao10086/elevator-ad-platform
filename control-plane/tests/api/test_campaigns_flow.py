@@ -19,6 +19,19 @@ def _strategy_payload() -> dict:
     }
 
 
+def _strategy_payload_with_interrupts() -> dict:
+    payload = _strategy_payload()
+    payload["time_rules"]["interrupts"] = [
+        {
+            "trigger_type": "command",
+            "ad_id": "AD_EMERGENCY_FIRE",
+            "priority": 999,
+            "play_mode": "loop_until_stop",
+        }
+    ]
+    return payload
+
+
 def _create_campaign(client) -> str:
     resp = client.post("/api/v1/campaigns/strategy", json=_strategy_payload())
     assert resp.status_code == 200
@@ -84,6 +97,48 @@ def test_get_schedule_config_returns_pure_json(client):
     assert "playlist" in body
     assert isinstance(body["playlist"], list)
     assert "campaign_id" not in body
+
+
+def test_get_edge_schedule_returns_terminal_shape(client):
+    campaign_id = _create_campaign(client)
+    resp = client.get(f"/api/v1/campaigns/{campaign_id}/edge-schedule")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["policy_id"].startswith("POL_SH_")
+    assert "effective_date" in body
+    assert "download_base_url" in body
+    assert "global_config" in body
+    assert body["global_config"]["default_volume"] == 60
+    assert body["global_config"]["download_retry_count"] == 3
+    assert body["global_config"]["report_interval_sec"] == 60
+    assert isinstance(body["interrupts"], list)
+    assert isinstance(body["time_slots"], list)
+    assert len(body["time_slots"]) == 3
+    first = body["time_slots"][0]
+    assert first["time_range"] == "08:00:00-10:00:00"
+    assert first["loop_mode"] == "sequence"
+    assert "ad_101" in first["playlist"]
+    fallback = body["time_slots"][-1]
+    assert fallback["slot_id"] == 99
+    assert fallback["time_range"] == "00:00:00-23:59:59"
+    assert fallback["loop_mode"] == "random"
+
+
+def test_get_edge_schedule_contains_interrupts_from_time_rules(client):
+    resp = client.post("/api/v1/campaigns/strategy", json=_strategy_payload_with_interrupts())
+    assert resp.status_code == 200
+    campaign_id = resp.json()["campaign_id"]
+
+    edge = client.get(f"/api/v1/campaigns/{campaign_id}/edge-schedule")
+    assert edge.status_code == 200
+    body = edge.json()
+    assert isinstance(body["interrupts"], list)
+    assert len(body["interrupts"]) == 1
+    item = body["interrupts"][0]
+    assert item["trigger_type"] == "command"
+    assert item["ad_id"] == "AD_EMERGENCY_FIRE"
+    assert item["priority"] == 999
+    assert item["play_mode"] == "loop_until_stop"
 
 
 def test_rollback_publish_now_success(client, monkeypatch):
