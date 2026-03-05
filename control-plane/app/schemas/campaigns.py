@@ -57,3 +57,20 @@ class CampaignMeta(BaseModel):
 class CampaignListResponse(BaseModel):
     total: int
     items: List[CampaignMeta]
+
+
+class CampaignVersionMeta(BaseModel):
+    campaign_id: str
+    version: str
+    schedule_json: Dict[str, Any]
+    created_at: Optional[datetime] = None
+
+
+class CampaignVersionListResponse(BaseModel):
+    total: int
+    items: List[CampaignVersionMeta]
+
+
+class CampaignRollbackRequest(BaseModel):
+    version: str
+    publish_now: bool = False

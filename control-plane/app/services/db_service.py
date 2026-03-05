@@ -436,3 +436,74 @@ def get_latest_failed_campaign_devices(campaign_id: str) -> list:
         return [r[0] for r in cur.fetchall()]
     finally:
         conn.close()
+
+
+def insert_campaign_version(campaign_id: str, version: str, schedule_json: dict) -> int:
+    """
+    Save a campaign version snapshot for history/rollback.
+    """
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS campaign_versions (
+                id BIGSERIAL PRIMARY KEY,
+                campaign_id TEXT NOT NULL,
+                version TEXT NOT NULL,
+                schedule_json JSONB NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                UNIQUE (campaign_id, version)
+            )
+            """
+        )
+        cur.execute(
+            """
+            INSERT INTO campaign_versions (campaign_id, version, schedule_json)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (campaign_id, version)
+            DO UPDATE SET schedule_json = EXCLUDED.schedule_json, created_at = now()
+            """,
+            [campaign_id, version, Json(schedule_json)],
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def list_campaign_versions(campaign_id: str, limit: int = 50, offset: int = 0) -> list:
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            """
+            SELECT campaign_id, version, schedule_json, created_at
+            FROM campaign_versions
+            WHERE campaign_id = %s
+            ORDER BY created_at DESC
+            LIMIT %s OFFSET %s
+            """,
+            [campaign_id, limit, offset],
+        )
+        return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def get_campaign_version(campaign_id: str, version: str):
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            """
+            SELECT campaign_id, version, schedule_json, created_at
+            FROM campaign_versions
+            WHERE campaign_id = %s AND version = %s
+            LIMIT 1
+            """,
+            [campaign_id, version],
+        )
+        return cur.fetchone()
+    finally:
+        conn.close()
