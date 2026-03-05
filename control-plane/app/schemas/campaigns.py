@@ -3,6 +3,13 @@ from typing import Any, List, Dict, Literal, Optional
 from datetime import datetime
 
 
+class InterruptItem(BaseModel):
+    trigger_type: Literal["command", "signal"]
+    ad_id: str
+    priority: int
+    play_mode: str
+
+
 class CampaignAdItem(BaseModel):
     id: str
     file: str
@@ -24,6 +31,7 @@ class ScheduleConfig(BaseModel):
     version: str
     download_base_url: str
     playlist: List[SchedulePlaylistItem]
+    interrupts: List[InterruptItem] = []
 
 
 class CampaignStrategyRequest(BaseModel):

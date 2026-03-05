@@ -45,6 +45,16 @@ def _parse_slot_to_range(slot: str) -> Optional[tuple]:
     return (start_m, end_m)
 
 
+def _slot_to_edge_time_range(slot: str) -> Optional[str]:
+    if slot == "*":
+        return "00:00:00-23:59:59"
+    parsed = _parse_slot_to_range(slot)
+    if not parsed:
+        return None
+    start, end = slot.split("-")
+    return f"{start}:00-{end}:00"
+
+
 def _has_slot_overlap(ranges: List[tuple]) -> bool:
     if len(ranges) <= 1:
         return False
@@ -166,6 +176,122 @@ def _is_idempotent_success(
     if not all(bool(result_map[d].get("ok")) for d in target_devices):
         return None
     return latest
+
+
+def _build_edge_schedule(schedule_json: Dict[str, Any]) -> Dict[str, Any]:
+    version = str(schedule_json.get("version") or datetime.utcnow().strftime("%Y%m%d") + "_v1")
+    version_date = version.split("_")[0]
+    if len(version_date) == 8 and version_date.isdigit():
+        effective_date = f"{version_date[:4]}-{version_date[4:6]}-{version_date[6:]}"
+    else:
+        effective_date = datetime.utcnow().strftime("%Y-%m-%d")
+
+    suffix = version.split("_", 1)[1].upper() if "_" in version else "V1"
+    policy_id = f"POL_SH_{version_date}_{suffix}"
+
+    playlist = schedule_json.get("playlist") or []
+    interrupts = schedule_json.get("interrupts") or []
+    slot_map: Dict[str, Dict[str, Any]] = {}
+    for item in playlist:
+        if not isinstance(item, dict):
+            continue
+        ad_id = item.get("id")
+        if not isinstance(ad_id, str) or not ad_id:
+            continue
+        ad_priority = item.get("priority", 1)
+        if not isinstance(ad_priority, int):
+            ad_priority = 1
+        slots = item.get("slots") or []
+        if not isinstance(slots, list):
+            continue
+        for s in slots:
+            if not isinstance(s, str):
+                continue
+            edge_range = _slot_to_edge_time_range(s)
+            if not edge_range:
+                continue
+            entry = slot_map.setdefault(
+                edge_range,
+                {
+                    "time_range": edge_range,
+                    "priority": 1,
+                    "volume": 60,
+                    "loop_mode": "sequence",
+                    "playlist": [],
+                },
+            )
+            if ad_priority > entry["priority"]:
+                entry["priority"] = ad_priority
+            if edge_range == "00:00:00-23:59:59":
+                entry["volume"] = 0
+                entry["loop_mode"] = "random"
+            if ad_id not in entry["playlist"]:
+                entry["playlist"].append(ad_id)
+
+    all_ad_ids: List[str] = []
+    for item in playlist:
+        if isinstance(item, dict) and isinstance(item.get("id"), str):
+            ad_id = item["id"]
+            if ad_id and ad_id not in all_ad_ids:
+                all_ad_ids.append(ad_id)
+
+    fallback_range = "00:00:00-23:59:59"
+    # Always provide fallback slot for edge-side default strategy.
+    fallback_entry = slot_map.get(
+        fallback_range,
+        {
+            "time_range": fallback_range,
+            "priority": 1,
+            "volume": 0,
+            "loop_mode": "random",
+            "playlist": [],
+        },
+    )
+    if not fallback_entry["playlist"]:
+        fallback_entry["playlist"] = list(all_ad_ids)
+    fallback_entry["priority"] = 1
+    fallback_entry["volume"] = 0
+    fallback_entry["loop_mode"] = "random"
+    slot_map[fallback_range] = fallback_entry
+
+    # Make deterministic output for non-fallback ranges.
+    non_fallback_ranges = sorted([k for k in slot_map.keys() if k != fallback_range])
+    time_slots = []
+    for idx, key in enumerate(non_fallback_ranges, start=1):
+        entry = slot_map[key]
+        time_slots.append(
+            {
+                "slot_id": idx,
+                "time_range": entry["time_range"],
+                "volume": entry["volume"],
+                "priority": entry["priority"],
+                "loop_mode": entry["loop_mode"],
+                "playlist": entry["playlist"],
+            }
+        )
+    time_slots.append(
+        {
+            "slot_id": 99,
+            "time_range": fallback_entry["time_range"],
+            "volume": fallback_entry["volume"],
+            "priority": fallback_entry["priority"],
+            "loop_mode": fallback_entry["loop_mode"],
+            "playlist": fallback_entry["playlist"],
+        }
+    )
+
+    return {
+        "policy_id": policy_id,
+        "effective_date": effective_date,
+        "download_base_url": schedule_json.get("download_base_url") or "https://oss.aliyun.com/ads/",
+        "global_config": {
+            "default_volume": 60,
+            "download_retry_count": 3,
+            "report_interval_sec": 60,
+        },
+        "interrupts": interrupts if isinstance(interrupts, list) else [],
+        "time_slots": time_slots,
+    }
 
 
 def _push_schedule_to_devices(
@@ -337,6 +463,34 @@ def create_campaign_strategy(payload: CampaignStrategyRequest):
     if not download_base_url:
         download_base_url = "https://oss.aliyun.com/ads/"
 
+    interrupts = payload.time_rules.get("interrupts") or []
+    if not isinstance(interrupts, list):
+        raise HTTPException(status_code=400, detail="time_rules.interrupts must be a list")
+    normalized_interrupts = []
+    for idx, item in enumerate(interrupts):
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail=f"time_rules.interrupts[{idx}] must be an object")
+        trigger_type = item.get("trigger_type")
+        ad_id = item.get("ad_id")
+        priority = item.get("priority")
+        play_mode = item.get("play_mode")
+        if trigger_type not in {"command", "signal"}:
+            raise HTTPException(status_code=400, detail=f"time_rules.interrupts[{idx}] invalid trigger_type")
+        if not isinstance(ad_id, str) or not ad_id:
+            raise HTTPException(status_code=400, detail=f"time_rules.interrupts[{idx}] invalid ad_id")
+        if not isinstance(priority, int) or priority <= 0:
+            raise HTTPException(status_code=400, detail=f"time_rules.interrupts[{idx}] invalid priority")
+        if not isinstance(play_mode, str) or not play_mode:
+            raise HTTPException(status_code=400, detail=f"time_rules.interrupts[{idx}] invalid play_mode")
+        normalized_interrupts.append(
+            {
+                "trigger_type": trigger_type,
+                "ad_id": ad_id,
+                "priority": priority,
+                "play_mode": play_mode,
+            }
+        )
+
     schedule_config = ScheduleConfig(
         version=version,
         download_base_url=download_base_url,
@@ -350,6 +504,7 @@ def create_campaign_strategy(payload: CampaignStrategyRequest):
             }
             for ad in payload.ads_list
         ],
+        interrupts=normalized_interrupts,
     )
 
     now = datetime.utcnow().isoformat() + "Z"
@@ -480,6 +635,31 @@ def get_campaign_schedule_config(campaign_id: str):
         raise HTTPException(status_code=400, detail="invalid schedule_json")
 
     return schedule_json
+
+
+@router.get("/{campaign_id}/edge-schedule")
+def get_campaign_edge_schedule(campaign_id: str):
+    """
+    Export edge-consumable schedule JSON for terminal SyncSchedule().
+    """
+    db_error = False
+    try:
+        campaign = db_service.get_campaign(campaign_id)
+    except Exception:
+        campaign = None
+        db_error = True
+
+    if not campaign and _fallback_enabled():
+        campaign = _CAMPAIGN_STORE.get(campaign_id)
+    if not campaign and db_error and not _fallback_enabled():
+        raise HTTPException(status_code=503, detail="database unavailable")
+    if not campaign:
+        raise HTTPException(status_code=404, detail="campaign not found")
+
+    schedule_json = _normalize_schedule_json(campaign.get("schedule_json"))
+    if not schedule_json:
+        raise HTTPException(status_code=400, detail="invalid schedule_json")
+    return _build_edge_schedule(schedule_json)
 
 
 @router.get("/{campaign_id}/publish-logs")

@@ -74,6 +74,8 @@ python -m uvicorn app.main:app --reload --port 8000
 - `GET /health`
 - `GET /api/debug/db/ping`
 - `GET /api/v1/devices/remote/{device_id}/snapshot`
+- `GET /api/v1/campaigns/{campaign_id}/schedule-config`（导出纯 `schedule_config`）
+- `GET /api/v1/campaigns/{campaign_id}/edge-schedule`（导出端侧 `SyncSchedule` 专用 JSON）
 
 数据库配置请参考：`control-plane/DB_SETUP.md`
 
@@ -103,6 +105,8 @@ python -m pytest -c pytest.ini tests/api/test_campaigns_flow.py
 - 失败重试异常路径（503/502）
 - 回滚发布成功路径
 - publish / rollback 幂等行为
+- 端侧导出结构校验（`edge-schedule`）
+- 中断策略（interrupts）透传校验
 
 ---
 
@@ -120,6 +124,38 @@ python -m pytest -c pytest.ini tests/api/test_campaigns_flow.py
 
 ---
 
+## 端侧导出格式（SyncSchedule）
+
+`GET /api/v1/campaigns/{campaign_id}/edge-schedule` 返回端侧可直接消费的策略 JSON，核心字段：
+
+- `policy_id`
+- `effective_date`
+- `download_base_url`
+- `global_config`（`default_volume` / `download_retry_count` / `report_interval_sec`）
+- `interrupts`
+- `time_slots`
+
+### 默认兜底策略
+
+导出时会强制补齐默认兜底槽位：
+
+- `slot_id=99`
+- `time_range=00:00:00-23:59:59`
+- `loop_mode=random`
+- `priority=1`
+- `volume=0`
+
+### 紧急插播/霸屏策略（interrupts）
+
+在创建策略时，可通过 `time_rules.interrupts` 传入，单项结构：
+
+- `trigger_type`: `command` 或 `signal`
+- `ad_id`: 中断广告 ID
+- `priority`: 正整数（建议高于普通时段）
+- `play_mode`: 如 `loop_until_stop`
+
+---
+
 ## 当前进度（设备与内容管理 + 广告策略）
 
 已完成：
@@ -129,6 +165,8 @@ python -m pytest -c pytest.ini tests/api/test_campaigns_flow.py
 - 设备注册入库与远程命令链路打通
 - 广告策略核心闭环：
   - `POST /campaigns/strategy`
+  - `GET /campaigns/{id}/schedule-config`
+  - `GET /campaigns/{id}/edge-schedule`
   - `POST /campaigns/{id}/publish`
   - `GET /campaigns/{id}/publish-logs`
   - `GET /campaigns/{id}/versions`
@@ -137,6 +175,7 @@ python -m pytest -c pytest.ini tests/api/test_campaigns_flow.py
 - 发布前校验增强（素材、设备、时段、优先级、重复项）
 - 错误语义标准化（400/404/502/503）
 - 幂等一致性增强（publish/rollback 二次调用不重复下发）
+- 端侧协议增强：`global_config`、`interrupts`、`time_slots` 及默认兜底 `slot_id=99`
 
 待完成（下一步）：
 
