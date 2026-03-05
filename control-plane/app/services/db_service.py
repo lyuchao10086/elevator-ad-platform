@@ -314,3 +314,125 @@ def insert_device(device_id: str, location: str = None, status: str = "online") 
         conn.commit()
     finally:
         conn.close()
+
+
+def insert_campaign_publish_logs(
+    campaign_id: str,
+    version: str,
+    results: list,
+    batch_id: str = None,
+) -> int:
+    """
+    Persist per-device publish results for audit/retry.
+    Returns number of inserted rows.
+    """
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        # Keep this self-contained so local environments do not need manual migration first.
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS campaign_publish_logs (
+                id BIGSERIAL PRIMARY KEY,
+                campaign_id TEXT NOT NULL,
+                batch_id TEXT,
+                version TEXT,
+                device_id TEXT NOT NULL,
+                ok BOOLEAN NOT NULL,
+                error TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+
+        # Best-effort migration for existing tables.
+        try:
+            cur.execute("ALTER TABLE campaign_publish_logs ADD COLUMN IF NOT EXISTS batch_id TEXT")
+        except Exception:
+            pass
+
+        inserted = 0
+        for r in results or []:
+            cur.execute(
+                """
+                INSERT INTO campaign_publish_logs (campaign_id, batch_id, version, device_id, ok, error)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    campaign_id,
+                    batch_id,
+                    version,
+                    r.get("device_id"),
+                    bool(r.get("ok")),
+                    r.get("error"),
+                ),
+            )
+            inserted += 1
+        conn.commit()
+        return inserted
+    finally:
+        conn.close()
+
+
+def get_latest_failed_campaign_devices(campaign_id: str) -> list:
+    """
+    Return failed device_ids from the latest publish batch for a campaign.
+    """
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT to_regclass('public.campaign_publish_logs')
+            """
+        )
+        if not cur.fetchone()[0]:
+            return []
+
+        # Prefer explicit batch grouping when available.
+        try:
+            cur.execute(
+                """
+                SELECT batch_id
+                FROM campaign_publish_logs
+                WHERE campaign_id = %s AND batch_id IS NOT NULL
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                [campaign_id],
+            )
+            row = cur.fetchone()
+        except Exception:
+            row = None
+
+        if row and row[0]:
+            cur.execute(
+                """
+                SELECT DISTINCT device_id
+                FROM campaign_publish_logs
+                WHERE campaign_id = %s AND batch_id = %s AND ok = false
+                """,
+                [campaign_id, row[0]],
+            )
+            return [r[0] for r in cur.fetchall()]
+
+        # Fallback for historical rows without batch_id: use the latest 5-second window.
+        cur.execute(
+            """
+            WITH latest AS (
+                SELECT max(created_at) AS ts
+                FROM campaign_publish_logs
+                WHERE campaign_id = %s
+            )
+            SELECT DISTINCT l.device_id
+            FROM campaign_publish_logs l, latest
+            WHERE l.campaign_id = %s
+              AND latest.ts IS NOT NULL
+              AND l.created_at >= latest.ts - interval '5 seconds'
+              AND l.ok = false
+            """,
+            [campaign_id, campaign_id],
+        )
+        return [r[0] for r in cur.fetchall()]
+    finally:
+        conn.close()
