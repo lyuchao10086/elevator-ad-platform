@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     snapshot_wait_timeout: int = int(os.getenv("SNAPSHOT_WAIT_TIMEOUT", "15"))
 
     # --- 环境变量配置 ---
+    # Toggle memory fallback for campaign endpoints when DB is unavailable.
+    enable_memory_fallback: bool = os.getenv("ENABLE_MEMORY_FALLBACK", "true").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
     class Config:
         env_file = ".env" # 允许从 .env 文件读取变量
         case_sensitive = False

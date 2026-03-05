@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
+from app.core.config import settings
 from app.schemas.campaigns import (
     CampaignListResponse,
     CampaignRollbackRequest,
@@ -63,6 +64,10 @@ def _normalize_schedule_json(schedule_json: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(schedule_json, dict):
         return None
     return schedule_json
+
+
+def _fallback_enabled() -> bool:
+    return bool(settings.enable_memory_fallback)
 
 
 def _push_schedule_to_devices(
@@ -181,12 +186,13 @@ def _validate_publish_inputs(schedule_json: Dict[str, Any], target_devices: List
 def _save_campaign_version(campaign_id: str, version: str, schedule_json: Dict[str, Any]) -> bool:
     if not version:
         return False
-    _CAMPAIGN_VERSION_STORE.setdefault(campaign_id, {})[version] = {
-        "campaign_id": campaign_id,
-        "version": version,
-        "schedule_json": schedule_json,
-        "created_at": datetime.utcnow().isoformat() + "Z",
-    }
+    if _fallback_enabled():
+        _CAMPAIGN_VERSION_STORE.setdefault(campaign_id, {})[version] = {
+            "campaign_id": campaign_id,
+            "version": version,
+            "schedule_json": schedule_json,
+            "created_at": datetime.utcnow().isoformat() + "Z",
+        }
     try:
         db_service.insert_campaign_version(campaign_id, version, schedule_json)
         return True
@@ -265,9 +271,12 @@ def create_campaign_strategy(payload: CampaignStrategyRequest):
         db_service.insert_campaign(campaign_row)
         persisted = True
     except Exception:
-        # DB is optional for local integration tests; keep memory copy as fallback.
+        # DB is optional for local integration tests when fallback is enabled.
+        if not _fallback_enabled():
+            raise HTTPException(status_code=503, detail="database unavailable")
         persisted = False
-    _CAMPAIGN_STORE[campaign_id] = campaign_row
+    if _fallback_enabled():
+        _CAMPAIGN_STORE[campaign_id] = campaign_row
     _save_campaign_version(campaign_id, version, schedule_config.model_dump())
 
     return CampaignStrategyResponse(
@@ -287,6 +296,8 @@ def list_campaigns(limit: int = 100, offset: int = 0):
         rows = None
 
     if rows is None:
+        if not _fallback_enabled():
+            raise HTTPException(status_code=503, detail="database unavailable")
         # Fallback path used in local dev when DB is not configured.
         mem_items = list(_CAMPAIGN_STORE.values())
         items = []
@@ -326,12 +337,16 @@ def list_campaigns(limit: int = 100, offset: int = 0):
 
 @router.get("/{campaign_id}")
 def get_campaign(campaign_id: str):
+    db_error = False
     try:
         r = db_service.get_campaign(campaign_id)
     except Exception:
         r = None
-    if not r:
+        db_error = True
+    if not r and _fallback_enabled():
         r = _CAMPAIGN_STORE.get(campaign_id)
+    if not r and db_error and not _fallback_enabled():
+        raise HTTPException(status_code=503, detail="database unavailable")
     if not r:
         raise HTTPException(status_code=404, detail="campaign not found")
     return r
@@ -340,11 +355,13 @@ def get_campaign(campaign_id: str):
 @router.get("/{campaign_id}/publish-logs")
 def get_campaign_publish_logs(campaign_id: str, limit: int = 100, offset: int = 0):
     # Ensure campaign exists first.
-    campaign = _CAMPAIGN_STORE.get(campaign_id)
+    campaign = _CAMPAIGN_STORE.get(campaign_id) if _fallback_enabled() else None
     if not campaign:
         try:
             campaign = db_service.get_campaign(campaign_id)
         except Exception:
+            if not _fallback_enabled():
+                raise HTTPException(status_code=503, detail="database unavailable")
             campaign = None
     if not campaign:
         raise HTTPException(status_code=404, detail="campaign not found")
@@ -367,7 +384,7 @@ def get_campaign_publish_logs(campaign_id: str, limit: int = 100, offset: int = 
 
 @router.post("/{campaign_id}/publish")
 def publish_campaign(campaign_id: str):
-    mem = _CAMPAIGN_STORE.get(campaign_id)
+    mem = _CAMPAIGN_STORE.get(campaign_id) if _fallback_enabled() else None
     if mem:
         mem["status"] = "published"
         mem["updated_at"] = datetime.utcnow().isoformat() + "Z"
@@ -382,6 +399,8 @@ def publish_campaign(campaign_id: str):
         try:
             campaign = db_service.get_campaign(campaign_id)
         except Exception:
+            if not _fallback_enabled():
+                return {"ok": False, "updated": updated, "message": "database unavailable"}
             campaign = None
     if not campaign:
         return {"ok": False, "updated": updated, "message": "campaign not found"}
@@ -436,6 +455,8 @@ def list_versions(campaign_id: str, limit: int = 50, offset: int = 0):
         rows = None
 
     if rows is None:
+        if not _fallback_enabled():
+            raise HTTPException(status_code=503, detail="database unavailable")
         mem = list((_CAMPAIGN_VERSION_STORE.get(campaign_id) or {}).values())
         mem.sort(key=lambda x: x.get("created_at") or "", reverse=True)
         items = mem[offset:offset + limit]
@@ -446,11 +467,13 @@ def list_versions(campaign_id: str, limit: int = 50, offset: int = 0):
 
 @router.post("/{campaign_id}/retry-failed")
 def retry_failed_devices(campaign_id: str):
-    campaign = _CAMPAIGN_STORE.get(campaign_id)
+    campaign = _CAMPAIGN_STORE.get(campaign_id) if _fallback_enabled() else None
     if not campaign:
         try:
             campaign = db_service.get_campaign(campaign_id)
         except Exception:
+            if not _fallback_enabled():
+                return {"ok": False, "message": "database unavailable"}
             campaign = None
     if not campaign:
         return {"ok": False, "message": "campaign not found"}
@@ -502,8 +525,10 @@ def rollback_campaign(campaign_id: str, body: CampaignRollbackRequest):
     try:
         version_row = db_service.get_campaign_version(campaign_id, version)
     except Exception:
+        if not _fallback_enabled():
+            raise HTTPException(status_code=503, detail="database unavailable")
         version_row = None
-    if not version_row:
+    if not version_row and _fallback_enabled():
         version_row = (_CAMPAIGN_VERSION_STORE.get(campaign_id) or {}).get(version)
     if not version_row:
         raise HTTPException(status_code=404, detail="campaign version not found")
@@ -512,11 +537,13 @@ def rollback_campaign(campaign_id: str, body: CampaignRollbackRequest):
     if not schedule_json:
         raise HTTPException(status_code=400, detail="invalid campaign version schedule")
 
-    campaign = _CAMPAIGN_STORE.get(campaign_id)
+    campaign = _CAMPAIGN_STORE.get(campaign_id) if _fallback_enabled() else None
     if not campaign:
         try:
             campaign = db_service.get_campaign(campaign_id)
         except Exception:
+            if not _fallback_enabled():
+                raise HTTPException(status_code=503, detail="database unavailable")
             campaign = None
     if not campaign:
         raise HTTPException(status_code=404, detail="campaign not found")
@@ -524,7 +551,8 @@ def rollback_campaign(campaign_id: str, body: CampaignRollbackRequest):
     campaign["schedule_json"] = schedule_json
     campaign["version"] = version
     campaign["updated_at"] = datetime.utcnow().isoformat() + "Z"
-    _CAMPAIGN_STORE[campaign_id] = campaign
+    if _fallback_enabled():
+        _CAMPAIGN_STORE[campaign_id] = campaign
     try:
         db_service.insert_campaign(campaign)
     except Exception:
