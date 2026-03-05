@@ -75,6 +75,17 @@ def test_publish_campaign_success(client, monkeypatch):
     assert body["persisted_logs"] == 2
 
 
+def test_get_schedule_config_returns_pure_json(client):
+    campaign_id = _create_campaign(client)
+    resp = client.get(f"/api/v1/campaigns/{campaign_id}/schedule-config")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["type"] == "schedule_update"
+    assert "playlist" in body
+    assert isinstance(body["playlist"], list)
+    assert "campaign_id" not in body
+
+
 def test_rollback_publish_now_success(client, monkeypatch):
     campaign_id = _create_campaign(client)
     versions_resp = client.get(f"/api/v1/campaigns/{campaign_id}/versions")
