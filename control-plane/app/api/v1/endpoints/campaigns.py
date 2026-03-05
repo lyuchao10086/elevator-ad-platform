@@ -456,6 +456,32 @@ def get_campaign(campaign_id: str):
     return r
 
 
+@router.get("/{campaign_id}/schedule-config")
+def get_campaign_schedule_config(campaign_id: str):
+    """
+    Export pure schedule_config JSON for edge-side schedule.json consumption.
+    """
+    db_error = False
+    try:
+        campaign = db_service.get_campaign(campaign_id)
+    except Exception:
+        campaign = None
+        db_error = True
+
+    if not campaign and _fallback_enabled():
+        campaign = _CAMPAIGN_STORE.get(campaign_id)
+    if not campaign and db_error and not _fallback_enabled():
+        raise HTTPException(status_code=503, detail="database unavailable")
+    if not campaign:
+        raise HTTPException(status_code=404, detail="campaign not found")
+
+    schedule_json = _normalize_schedule_json(campaign.get("schedule_json"))
+    if not schedule_json:
+        raise HTTPException(status_code=400, detail="invalid schedule_json")
+
+    return schedule_json
+
+
 @router.get("/{campaign_id}/publish-logs")
 def get_campaign_publish_logs(campaign_id: str, limit: int = 100, offset: int = 0):
     # Ensure campaign exists first.
