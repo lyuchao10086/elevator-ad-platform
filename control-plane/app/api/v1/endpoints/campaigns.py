@@ -70,6 +70,10 @@ def _fallback_enabled() -> bool:
     return bool(settings.enable_memory_fallback)
 
 
+def _all_push_failed(push_summary: Dict[str, Any]) -> bool:
+    return push_summary.get("total", 0) > 0 and push_summary.get("pushed", 0) == 0
+
+
 def _push_schedule_to_devices(
     campaign_id: str,
     version: str,
@@ -392,6 +396,8 @@ def publish_campaign(campaign_id: str):
     try:
         updated = db_service.update_campaign_status(campaign_id, "published")
     except Exception:
+        if not _fallback_enabled():
+            raise HTTPException(status_code=503, detail="database unavailable")
         updated = 0
 
     campaign = mem
@@ -400,10 +406,10 @@ def publish_campaign(campaign_id: str):
             campaign = db_service.get_campaign(campaign_id)
         except Exception:
             if not _fallback_enabled():
-                return {"ok": False, "updated": updated, "message": "database unavailable"}
+                raise HTTPException(status_code=503, detail="database unavailable")
             campaign = None
     if not campaign:
-        return {"ok": False, "updated": updated, "message": "campaign not found"}
+        raise HTTPException(status_code=404, detail="campaign not found")
 
     schedule_json = _normalize_schedule_json(campaign.get("schedule_json"))
     if not schedule_json:
@@ -419,13 +425,14 @@ def publish_campaign(campaign_id: str):
     target_devices = [d for d in target_devices if isinstance(d, str) and d.strip()]
     validation = _validate_publish_inputs(schedule_json, target_devices)
     if not validation["ok"]:
-        return {
-            "ok": False,
-            "updated": updated,
-            "message": "publish validation failed",
-            "errors": validation["errors"],
-            "warnings": validation["warnings"],
-        }
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "publish validation failed",
+                "errors": validation["errors"],
+                "warnings": validation["warnings"],
+            },
+        )
 
     push_summary = _push_schedule_to_devices(
         campaign_id=campaign_id,
@@ -433,6 +440,15 @@ def publish_campaign(campaign_id: str):
         schedule_json=schedule_json,
         target_devices=target_devices,
     )
+    if _all_push_failed(push_summary):
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "gateway delivery failed",
+                "batch_id": push_summary["batch_id"],
+                "results": push_summary["results"],
+            },
+        )
     response = {
         "ok": push_summary["ok"],
         "updated": updated,
@@ -473,10 +489,10 @@ def retry_failed_devices(campaign_id: str):
             campaign = db_service.get_campaign(campaign_id)
         except Exception:
             if not _fallback_enabled():
-                return {"ok": False, "message": "database unavailable"}
+                raise HTTPException(status_code=503, detail="database unavailable")
             campaign = None
     if not campaign:
-        return {"ok": False, "message": "campaign not found"}
+        raise HTTPException(status_code=404, detail="campaign not found")
 
     schedule_json = _normalize_schedule_json(campaign.get("schedule_json"))
     if not schedule_json:
@@ -485,19 +501,21 @@ def retry_failed_devices(campaign_id: str):
     try:
         failed_devices = db_service.get_latest_failed_campaign_devices(campaign_id)
     except Exception as e:
-        return {"ok": False, "message": f"failed to query logs: {e}"}
+        raise HTTPException(status_code=503, detail=f"failed to query logs: {e}")
 
     failed_devices = [d for d in failed_devices if isinstance(d, str) and d.strip()]
     if not failed_devices:
         return {"ok": True, "retried": 0, "message": "no failed devices to retry"}
     validation = _validate_publish_inputs(schedule_json, failed_devices)
     if not validation["ok"]:
-        return {
-            "ok": False,
-            "message": "retry validation failed",
-            "errors": validation["errors"],
-            "warnings": validation["warnings"],
-        }
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "retry validation failed",
+                "errors": validation["errors"],
+                "warnings": validation["warnings"],
+            },
+        )
 
     push_summary = _push_schedule_to_devices(
         campaign_id=campaign_id,
@@ -505,6 +523,15 @@ def retry_failed_devices(campaign_id: str):
         schedule_json=schedule_json,
         target_devices=failed_devices,
     )
+    if _all_push_failed(push_summary):
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "gateway retry delivery failed",
+                "batch_id": push_summary["batch_id"],
+                "results": push_summary["results"],
+            },
+        )
     response = {
         "ok": push_summary["ok"],
         "retried": len(failed_devices),
@@ -569,12 +596,14 @@ def rollback_campaign(campaign_id: str, body: CampaignRollbackRequest):
     target_devices = [d for d in target_devices if isinstance(d, str) and d.strip()]
     validation = _validate_publish_inputs(schedule_json, target_devices)
     if not validation["ok"]:
-        return {
-            "ok": False,
-            "message": "rollback publish validation failed",
-            "errors": validation["errors"],
-            "warnings": validation["warnings"],
-        }
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "rollback publish validation failed",
+                "errors": validation["errors"],
+                "warnings": validation["warnings"],
+            },
+        )
 
     push_summary = _push_schedule_to_devices(
         campaign_id=campaign_id,
@@ -582,6 +611,15 @@ def rollback_campaign(campaign_id: str, body: CampaignRollbackRequest):
         schedule_json=schedule_json,
         target_devices=target_devices,
     )
+    if _all_push_failed(push_summary):
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "gateway rollback delivery failed",
+                "batch_id": push_summary["batch_id"],
+                "results": push_summary["results"],
+            },
+        )
     response = {
         "ok": push_summary["ok"],
         "campaign_id": campaign_id,
