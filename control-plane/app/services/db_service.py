@@ -438,6 +438,36 @@ def get_latest_failed_campaign_devices(campaign_id: str) -> list:
         conn.close()
 
 
+def list_campaign_publish_logs(campaign_id: str, limit: int = 100, offset: int = 0) -> list:
+    """
+    List publish logs for a campaign, newest first.
+    """
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            """
+            SELECT to_regclass('public.campaign_publish_logs')
+            """
+        )
+        if not cur.fetchone()[0]:
+            return []
+
+        cur.execute(
+            """
+            SELECT campaign_id, batch_id, version, device_id, ok, error, created_at
+            FROM campaign_publish_logs
+            WHERE campaign_id = %s
+            ORDER BY created_at DESC
+            LIMIT %s OFFSET %s
+            """,
+            [campaign_id, limit, offset],
+        )
+        return cur.fetchall()
+    finally:
+        conn.close()
+
+
 def insert_campaign_version(campaign_id: str, version: str, schedule_json: dict) -> int:
     """
     Save a campaign version snapshot for history/rollback.
@@ -505,5 +535,45 @@ def get_campaign_version(campaign_id: str, version: str):
             [campaign_id, version],
         )
         return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def get_existing_device_ids(device_ids: list) -> list:
+    """
+    Return subset of input device_ids that exist in devices table.
+    """
+    if not device_ids:
+        return []
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        sql = "SELECT device_id FROM devices WHERE device_id = ANY(%s)"
+        cur.execute(sql, [device_ids])
+        return [r[0] for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_existing_material_ids(ids: list) -> list:
+    """
+    Return subset of input ids that exist in materials table.
+    Tries `ad_id` first (if column exists), then falls back to `material_id`.
+    """
+    if not ids:
+        return []
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'materials'")
+        cols = {r[0] for r in cur.fetchall()}
+        if 'ad_id' in cols:
+            sql = "SELECT ad_id FROM materials WHERE ad_id = ANY(%s)"
+        elif 'material_id' in cols:
+            sql = "SELECT material_id FROM materials WHERE material_id = ANY(%s)"
+        else:
+            return []
+        cur.execute(sql, [ids])
+        return [r[0] for r in cur.fetchall()]
     finally:
         conn.close()

@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
+from app.core.config import settings
 from app.schemas.campaigns import (
     CampaignListResponse,
     CampaignRollbackRequest,
@@ -22,10 +23,36 @@ _SLOT_PATTERN = re.compile(r"^(?:\*|(?:[01]\d|2[0-3]):[0-5]\d-(?:[01]\d|2[0-3]):
 # In-memory fallback to keep local integration usable when Postgres is unavailable.
 _CAMPAIGN_STORE: Dict[str, Dict[str, Any]] = {}
 _CAMPAIGN_VERSION_STORE: Dict[str, Dict[str, Dict[str, Any]]] = {}
+_PUBLISH_BATCH_STORE: Dict[str, List[Dict[str, Any]]] = {}
 
 
 def dt(v: Optional[datetime]):
     return v.isoformat() if isinstance(v, datetime) else v
+
+
+def _parse_slot_to_range(slot: str) -> Optional[tuple]:
+    if slot == "*":
+        return (0, 24 * 60)
+    if not _SLOT_PATTERN.fullmatch(slot):
+        return None
+    start, end = slot.split("-")
+    sh, sm = start.split(":")
+    eh, em = end.split(":")
+    start_m = int(sh) * 60 + int(sm)
+    end_m = int(eh) * 60 + int(em)
+    if end_m <= start_m:
+        return None
+    return (start_m, end_m)
+
+
+def _has_slot_overlap(ranges: List[tuple]) -> bool:
+    if len(ranges) <= 1:
+        return False
+    ranges = sorted(ranges, key=lambda x: x[0])
+    for i in range(1, len(ranges)):
+        if ranges[i][0] < ranges[i - 1][1]:
+            return True
+    return False
 
 
 def _normalize_schedule_json(schedule_json: Any) -> Optional[Dict[str, Any]]:
@@ -38,6 +65,107 @@ def _normalize_schedule_json(schedule_json: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(schedule_json, dict):
         return None
     return schedule_json
+
+
+def _fallback_enabled() -> bool:
+    return bool(settings.enable_memory_fallback)
+
+
+def _all_push_failed(push_summary: Dict[str, Any]) -> bool:
+    return push_summary.get("total", 0) > 0 and push_summary.get("pushed", 0) == 0
+
+
+def _normalize_target_devices(raw_devices: Any) -> List[str]:
+    if isinstance(raw_devices, str):
+        raw_devices = [raw_devices]
+    if not isinstance(raw_devices, list):
+        return []
+    # Keep input order while removing duplicates/empties.
+    result: List[str] = []
+    seen = set()
+    for did in raw_devices:
+        if not isinstance(did, str):
+            continue
+        v = did.strip()
+        if not v or v in seen:
+            continue
+        seen.add(v)
+        result.append(v)
+    return result
+
+
+def _record_publish_batch(
+    campaign_id: str,
+    version: str,
+    batch_id: str,
+    results: List[Dict[str, Any]],
+) -> None:
+    if not _fallback_enabled():
+        return
+    _PUBLISH_BATCH_STORE.setdefault(campaign_id, []).append(
+        {
+            "campaign_id": campaign_id,
+            "version": version,
+            "batch_id": batch_id,
+            "results": results,
+            "created_at": datetime.utcnow().isoformat() + "Z",
+        }
+    )
+
+
+def _latest_batch_for_campaign(campaign_id: str) -> Optional[Dict[str, Any]]:
+    try:
+        rows = db_service.list_campaign_publish_logs(campaign_id, limit=500, offset=0)
+    except Exception:
+        rows = None
+
+    if rows:
+        first = rows[0]
+        batch_id = first.get("batch_id")
+        if batch_id:
+            items = [r for r in rows if r.get("batch_id") == batch_id]
+            return {
+                "campaign_id": campaign_id,
+                "version": first.get("version"),
+                "batch_id": batch_id,
+                "results": [
+                    {
+                        "device_id": r.get("device_id"),
+                        "ok": bool(r.get("ok")),
+                        "error": r.get("error"),
+                    }
+                    for r in items
+                ],
+            }
+
+    mem_items = _PUBLISH_BATCH_STORE.get(campaign_id) or []
+    if mem_items:
+        return mem_items[-1]
+    return None
+
+
+def _is_idempotent_success(
+    campaign_id: str,
+    version: str,
+    target_devices: List[str],
+) -> Optional[Dict[str, Any]]:
+    latest = _latest_batch_for_campaign(campaign_id)
+    if not latest:
+        return None
+    if latest.get("version") != version:
+        return None
+
+    result_map = {}
+    for r in latest.get("results") or []:
+        did = r.get("device_id")
+        if isinstance(did, str) and did not in result_map:
+            result_map[did] = r
+
+    if set(target_devices) != set(result_map.keys()):
+        return None
+    if not all(bool(result_map[d].get("ok")) for d in target_devices):
+        return None
+    return latest
 
 
 def _push_schedule_to_devices(
@@ -68,6 +196,12 @@ def _push_schedule_to_devices(
         )
     except Exception:
         persisted_logs = 0
+    _record_publish_batch(
+        campaign_id=campaign_id,
+        version=version,
+        batch_id=batch_id,
+        results=push_result,
+    )
 
     return {
         "ok": success_count > 0,
@@ -79,15 +213,90 @@ def _push_schedule_to_devices(
     }
 
 
+def _validate_publish_inputs(schedule_json: Dict[str, Any], target_devices: List[str]) -> Dict[str, Any]:
+    errors: List[str] = []
+    warnings: List[str] = []
+
+    playlist = schedule_json.get("playlist")
+    if not isinstance(playlist, list) or not playlist:
+        errors.append("playlist is empty")
+        return {"ok": False, "errors": errors, "warnings": warnings}
+
+    for idx, item in enumerate(playlist):
+        if not isinstance(item, dict):
+            errors.append(f"playlist[{idx}] is not an object")
+            continue
+        for key in ("id", "file", "md5"):
+            if not item.get(key):
+                errors.append(f"playlist[{idx}] missing {key}")
+        priority = item.get("priority")
+        if not isinstance(priority, int) or not (1 <= priority <= 100):
+            errors.append(f"playlist[{idx}] invalid priority: {priority}")
+        slots = item.get("slots")
+        if not isinstance(slots, list) or not slots:
+            errors.append(f"playlist[{idx}] slots is empty")
+            continue
+        slot_ranges = []
+        seen_slots = set()
+        for s in slots:
+            if not isinstance(s, str):
+                errors.append(f"playlist[{idx}] slot is not a string: {s}")
+                continue
+            if s in seen_slots:
+                errors.append(f"playlist[{idx}] duplicated slot: {s}")
+                continue
+            seen_slots.add(s)
+            parsed = _parse_slot_to_range(s)
+            if parsed is None:
+                errors.append(f"playlist[{idx}] invalid slot: {s}")
+                continue
+            if s != "*":
+                slot_ranges.append(parsed)
+        if "*" in seen_slots and len(seen_slots) > 1:
+            errors.append(f"playlist[{idx}] '*' cannot be mixed with other slots")
+        if _has_slot_overlap(slot_ranges):
+            errors.append(f"playlist[{idx}] slots overlap")
+
+    ids = [str(i.get("id")) for i in playlist if isinstance(i, dict) and i.get("id")]
+    if len(ids) != len(set(ids)):
+        errors.append("duplicated ad id in playlist")
+
+    if not target_devices:
+        errors.append("no target devices")
+        return {"ok": False, "errors": errors, "warnings": warnings}
+
+    # DB-backed existence checks (best-effort; no hard fail on DB outage).
+    try:
+        existing_devices = set(db_service.get_existing_device_ids(target_devices))
+        missing_devices = [d for d in target_devices if d not in existing_devices]
+        if missing_devices:
+            errors.append(f"unknown devices: {missing_devices}")
+    except Exception:
+        warnings.append("device existence check skipped (db unavailable)")
+
+    try:
+        ad_ids = [str(i.get("id")) for i in playlist if isinstance(i, dict) and i.get("id")]
+        if ad_ids:
+            existing_materials = set(db_service.get_existing_material_ids(ad_ids))
+            missing_materials = [m for m in ad_ids if m not in existing_materials]
+            if missing_materials:
+                errors.append(f"unknown materials: {missing_materials}")
+    except Exception:
+        warnings.append("material existence check skipped (db unavailable)")
+
+    return {"ok": len(errors) == 0, "errors": errors, "warnings": warnings}
+
+
 def _save_campaign_version(campaign_id: str, version: str, schedule_json: Dict[str, Any]) -> bool:
     if not version:
         return False
-    _CAMPAIGN_VERSION_STORE.setdefault(campaign_id, {})[version] = {
-        "campaign_id": campaign_id,
-        "version": version,
-        "schedule_json": schedule_json,
-        "created_at": datetime.utcnow().isoformat() + "Z",
-    }
+    if _fallback_enabled():
+        _CAMPAIGN_VERSION_STORE.setdefault(campaign_id, {})[version] = {
+            "campaign_id": campaign_id,
+            "version": version,
+            "schedule_json": schedule_json,
+            "created_at": datetime.utcnow().isoformat() + "Z",
+        }
     try:
         db_service.insert_campaign_version(campaign_id, version, schedule_json)
         return True
@@ -101,13 +310,28 @@ def create_campaign_strategy(payload: CampaignStrategyRequest):
     schedule_id = f"sch_{uuid.uuid4().hex[:8]}"
     version = datetime.utcnow().strftime("%Y%m%d") + "_v1"
 
+    ad_ids = [ad.id for ad in payload.ads_list]
+    if len(ad_ids) != len(set(ad_ids)):
+        raise HTTPException(status_code=400, detail="duplicated ad id in ads_list")
+
     for ad in payload.ads_list:
-        invalid_slots = [s for s in ad.slots if not _SLOT_PATTERN.fullmatch(s)]
-        if invalid_slots:
-            raise HTTPException(
-                status_code=400,
-                detail=f"invalid slots for ad {ad.id}: {invalid_slots}",
-            )
+        if not isinstance(ad.priority, int) or not (1 <= ad.priority <= 100):
+            raise HTTPException(status_code=400, detail=f"invalid priority for ad {ad.id}: {ad.priority}")
+        slot_ranges = []
+        seen_slots = set()
+        for s in ad.slots:
+            if s in seen_slots:
+                raise HTTPException(status_code=400, detail=f"duplicated slot for ad {ad.id}: {s}")
+            seen_slots.add(s)
+            parsed = _parse_slot_to_range(s)
+            if parsed is None:
+                raise HTTPException(status_code=400, detail=f"invalid slot for ad {ad.id}: {s}")
+            if s != "*":
+                slot_ranges.append(parsed)
+        if "*" in seen_slots and len(seen_slots) > 1:
+            raise HTTPException(status_code=400, detail=f"'*' cannot mix with other slots for ad {ad.id}")
+        if _has_slot_overlap(slot_ranges):
+            raise HTTPException(status_code=400, detail=f"overlapping slots for ad {ad.id}")
 
     download_base_url = payload.download_base_url or payload.time_rules.get("download_base_url")
     if not download_base_url:
@@ -151,9 +375,12 @@ def create_campaign_strategy(payload: CampaignStrategyRequest):
         db_service.insert_campaign(campaign_row)
         persisted = True
     except Exception:
-        # DB is optional for local integration tests; keep memory copy as fallback.
+        # DB is optional for local integration tests when fallback is enabled.
+        if not _fallback_enabled():
+            raise HTTPException(status_code=503, detail="database unavailable")
         persisted = False
-    _CAMPAIGN_STORE[campaign_id] = campaign_row
+    if _fallback_enabled():
+        _CAMPAIGN_STORE[campaign_id] = campaign_row
     _save_campaign_version(campaign_id, version, schedule_config.model_dump())
 
     return CampaignStrategyResponse(
@@ -173,6 +400,8 @@ def list_campaigns(limit: int = 100, offset: int = 0):
         rows = None
 
     if rows is None:
+        if not _fallback_enabled():
+            raise HTTPException(status_code=503, detail="database unavailable")
         # Fallback path used in local dev when DB is not configured.
         mem_items = list(_CAMPAIGN_STORE.values())
         items = []
@@ -212,20 +441,54 @@ def list_campaigns(limit: int = 100, offset: int = 0):
 
 @router.get("/{campaign_id}")
 def get_campaign(campaign_id: str):
+    db_error = False
     try:
         r = db_service.get_campaign(campaign_id)
     except Exception:
         r = None
-    if not r:
+        db_error = True
+    if not r and _fallback_enabled():
         r = _CAMPAIGN_STORE.get(campaign_id)
+    if not r and db_error and not _fallback_enabled():
+        raise HTTPException(status_code=503, detail="database unavailable")
     if not r:
         raise HTTPException(status_code=404, detail="campaign not found")
     return r
 
 
+@router.get("/{campaign_id}/publish-logs")
+def get_campaign_publish_logs(campaign_id: str, limit: int = 100, offset: int = 0):
+    # Ensure campaign exists first.
+    campaign = _CAMPAIGN_STORE.get(campaign_id) if _fallback_enabled() else None
+    if not campaign:
+        try:
+            campaign = db_service.get_campaign(campaign_id)
+        except Exception:
+            if not _fallback_enabled():
+                raise HTTPException(status_code=503, detail="database unavailable")
+            campaign = None
+    if not campaign:
+        raise HTTPException(status_code=404, detail="campaign not found")
+
+    try:
+        rows = db_service.list_campaign_publish_logs(campaign_id, limit=limit, offset=offset)
+    except Exception:
+        rows = []
+
+    success = sum(1 for r in rows if r.get("ok") is True)
+    failed = sum(1 for r in rows if r.get("ok") is False)
+    return {
+        "campaign_id": campaign_id,
+        "total": len(rows),
+        "success": success,
+        "failed": failed,
+        "items": rows,
+    }
+
+
 @router.post("/{campaign_id}/publish")
 def publish_campaign(campaign_id: str):
-    mem = _CAMPAIGN_STORE.get(campaign_id)
+    mem = _CAMPAIGN_STORE.get(campaign_id) if _fallback_enabled() else None
     if mem:
         mem["status"] = "published"
         mem["updated_at"] = datetime.utcnow().isoformat() + "Z"
@@ -233,6 +496,8 @@ def publish_campaign(campaign_id: str):
     try:
         updated = db_service.update_campaign_status(campaign_id, "published")
     except Exception:
+        if not _fallback_enabled():
+            raise HTTPException(status_code=503, detail="database unavailable")
         updated = 0
 
     campaign = mem
@@ -240,24 +505,45 @@ def publish_campaign(campaign_id: str):
         try:
             campaign = db_service.get_campaign(campaign_id)
         except Exception:
+            if not _fallback_enabled():
+                raise HTTPException(status_code=503, detail="database unavailable")
             campaign = None
     if not campaign:
-        return {"ok": False, "updated": updated, "message": "campaign not found"}
+        raise HTTPException(status_code=404, detail="campaign not found")
 
     schedule_json = _normalize_schedule_json(campaign.get("schedule_json"))
     if not schedule_json:
         return {"ok": False, "updated": updated, "message": "invalid schedule_json"}
     _save_campaign_version(campaign_id, campaign.get("version"), schedule_json)
 
-    target_devices = campaign.get("target_device_groups") or []
-    # Accept legacy storage style: single device string.
-    if isinstance(target_devices, str):
-        target_devices = [target_devices]
-    if not isinstance(target_devices, list):
-        target_devices = []
-    target_devices = [d for d in target_devices if isinstance(d, str) and d.strip()]
-    if not target_devices:
-        return {"ok": False, "updated": updated, "message": "no target devices"}
+    target_devices = _normalize_target_devices(campaign.get("target_device_groups") or [])
+    validation = _validate_publish_inputs(schedule_json, target_devices)
+    if not validation["ok"]:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "publish validation failed",
+                "errors": validation["errors"],
+                "warnings": validation["warnings"],
+            },
+        )
+    latest_ok = _is_idempotent_success(
+        campaign_id=campaign_id,
+        version=campaign.get("version"),
+        target_devices=target_devices,
+    )
+    if latest_ok:
+        return {
+            "ok": True,
+            "updated": updated,
+            "pushed": len(target_devices),
+            "total": len(target_devices),
+            "persisted_logs": 0,
+            "batch_id": latest_ok.get("batch_id"),
+            "results": latest_ok.get("results"),
+            "idempotent": True,
+            "message": "already published for current version and target devices",
+        }
 
     push_summary = _push_schedule_to_devices(
         campaign_id=campaign_id,
@@ -265,7 +551,16 @@ def publish_campaign(campaign_id: str):
         schedule_json=schedule_json,
         target_devices=target_devices,
     )
-    return {
+    if _all_push_failed(push_summary):
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "gateway delivery failed",
+                "batch_id": push_summary["batch_id"],
+                "results": push_summary["results"],
+            },
+        )
+    response = {
         "ok": push_summary["ok"],
         "updated": updated,
         "pushed": push_summary["pushed"],
@@ -274,6 +569,9 @@ def publish_campaign(campaign_id: str):
         "batch_id": push_summary["batch_id"],
         "results": push_summary["results"],
     }
+    if validation["warnings"]:
+        response["warnings"] = validation["warnings"]
+    return response
 
 
 @router.get("/{campaign_id}/versions", response_model=CampaignVersionListResponse)
@@ -284,6 +582,8 @@ def list_versions(campaign_id: str, limit: int = 50, offset: int = 0):
         rows = None
 
     if rows is None:
+        if not _fallback_enabled():
+            raise HTTPException(status_code=503, detail="database unavailable")
         mem = list((_CAMPAIGN_VERSION_STORE.get(campaign_id) or {}).values())
         mem.sort(key=lambda x: x.get("created_at") or "", reverse=True)
         items = mem[offset:offset + limit]
@@ -294,14 +594,16 @@ def list_versions(campaign_id: str, limit: int = 50, offset: int = 0):
 
 @router.post("/{campaign_id}/retry-failed")
 def retry_failed_devices(campaign_id: str):
-    campaign = _CAMPAIGN_STORE.get(campaign_id)
+    campaign = _CAMPAIGN_STORE.get(campaign_id) if _fallback_enabled() else None
     if not campaign:
         try:
             campaign = db_service.get_campaign(campaign_id)
         except Exception:
+            if not _fallback_enabled():
+                raise HTTPException(status_code=503, detail="database unavailable")
             campaign = None
     if not campaign:
-        return {"ok": False, "message": "campaign not found"}
+        raise HTTPException(status_code=404, detail="campaign not found")
 
     schedule_json = _normalize_schedule_json(campaign.get("schedule_json"))
     if not schedule_json:
@@ -310,11 +612,21 @@ def retry_failed_devices(campaign_id: str):
     try:
         failed_devices = db_service.get_latest_failed_campaign_devices(campaign_id)
     except Exception as e:
-        return {"ok": False, "message": f"failed to query logs: {e}"}
+        raise HTTPException(status_code=503, detail=f"failed to query logs: {e}")
 
     failed_devices = [d for d in failed_devices if isinstance(d, str) and d.strip()]
     if not failed_devices:
         return {"ok": True, "retried": 0, "message": "no failed devices to retry"}
+    validation = _validate_publish_inputs(schedule_json, failed_devices)
+    if not validation["ok"]:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "retry validation failed",
+                "errors": validation["errors"],
+                "warnings": validation["warnings"],
+            },
+        )
 
     push_summary = _push_schedule_to_devices(
         campaign_id=campaign_id,
@@ -322,7 +634,16 @@ def retry_failed_devices(campaign_id: str):
         schedule_json=schedule_json,
         target_devices=failed_devices,
     )
-    return {
+    if _all_push_failed(push_summary):
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "gateway retry delivery failed",
+                "batch_id": push_summary["batch_id"],
+                "results": push_summary["results"],
+            },
+        )
+    response = {
         "ok": push_summary["ok"],
         "retried": len(failed_devices),
         "pushed": push_summary["pushed"],
@@ -330,6 +651,9 @@ def retry_failed_devices(campaign_id: str):
         "batch_id": push_summary["batch_id"],
         "results": push_summary["results"],
     }
+    if validation["warnings"]:
+        response["warnings"] = validation["warnings"]
+    return response
 
 
 @router.post("/{campaign_id}/rollback")
@@ -339,8 +663,10 @@ def rollback_campaign(campaign_id: str, body: CampaignRollbackRequest):
     try:
         version_row = db_service.get_campaign_version(campaign_id, version)
     except Exception:
+        if not _fallback_enabled():
+            raise HTTPException(status_code=503, detail="database unavailable")
         version_row = None
-    if not version_row:
+    if not version_row and _fallback_enabled():
         version_row = (_CAMPAIGN_VERSION_STORE.get(campaign_id) or {}).get(version)
     if not version_row:
         raise HTTPException(status_code=404, detail="campaign version not found")
@@ -349,11 +675,13 @@ def rollback_campaign(campaign_id: str, body: CampaignRollbackRequest):
     if not schedule_json:
         raise HTTPException(status_code=400, detail="invalid campaign version schedule")
 
-    campaign = _CAMPAIGN_STORE.get(campaign_id)
+    campaign = _CAMPAIGN_STORE.get(campaign_id) if _fallback_enabled() else None
     if not campaign:
         try:
             campaign = db_service.get_campaign(campaign_id)
         except Exception:
+            if not _fallback_enabled():
+                raise HTTPException(status_code=503, detail="database unavailable")
             campaign = None
     if not campaign:
         raise HTTPException(status_code=404, detail="campaign not found")
@@ -361,7 +689,8 @@ def rollback_campaign(campaign_id: str, body: CampaignRollbackRequest):
     campaign["schedule_json"] = schedule_json
     campaign["version"] = version
     campaign["updated_at"] = datetime.utcnow().isoformat() + "Z"
-    _CAMPAIGN_STORE[campaign_id] = campaign
+    if _fallback_enabled():
+        _CAMPAIGN_STORE[campaign_id] = campaign
     try:
         db_service.insert_campaign(campaign)
     except Exception:
@@ -370,14 +699,36 @@ def rollback_campaign(campaign_id: str, body: CampaignRollbackRequest):
     if not body.publish_now:
         return {"ok": True, "campaign_id": campaign_id, "version": version, "published": False}
 
-    target_devices = campaign.get("target_device_groups") or []
-    if isinstance(target_devices, str):
-        target_devices = [target_devices]
-    if not isinstance(target_devices, list):
-        target_devices = []
-    target_devices = [d for d in target_devices if isinstance(d, str) and d.strip()]
-    if not target_devices:
-        return {"ok": False, "message": "no target devices"}
+    target_devices = _normalize_target_devices(campaign.get("target_device_groups") or [])
+    validation = _validate_publish_inputs(schedule_json, target_devices)
+    if not validation["ok"]:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "rollback publish validation failed",
+                "errors": validation["errors"],
+                "warnings": validation["warnings"],
+            },
+        )
+    latest_ok = _is_idempotent_success(
+        campaign_id=campaign_id,
+        version=version,
+        target_devices=target_devices,
+    )
+    if latest_ok:
+        return {
+            "ok": True,
+            "campaign_id": campaign_id,
+            "version": version,
+            "published": True,
+            "pushed": len(target_devices),
+            "total": len(target_devices),
+            "persisted_logs": 0,
+            "batch_id": latest_ok.get("batch_id"),
+            "results": latest_ok.get("results"),
+            "idempotent": True,
+            "message": "rollback version already published to target devices",
+        }
 
     push_summary = _push_schedule_to_devices(
         campaign_id=campaign_id,
@@ -385,7 +736,16 @@ def rollback_campaign(campaign_id: str, body: CampaignRollbackRequest):
         schedule_json=schedule_json,
         target_devices=target_devices,
     )
-    return {
+    if _all_push_failed(push_summary):
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "gateway rollback delivery failed",
+                "batch_id": push_summary["batch_id"],
+                "results": push_summary["results"],
+            },
+        )
+    response = {
         "ok": push_summary["ok"],
         "campaign_id": campaign_id,
         "version": version,
@@ -396,3 +756,6 @@ def rollback_campaign(campaign_id: str, body: CampaignRollbackRequest):
         "batch_id": push_summary["batch_id"],
         "results": push_summary["results"],
     }
+    if validation["warnings"]:
+        response["warnings"] = validation["warnings"]
+    return response
