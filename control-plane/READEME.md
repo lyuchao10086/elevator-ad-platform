@@ -121,3 +121,23 @@ control-plane/
 - `REDIS_HOST / REDIS_PORT / REDIS_DB`
 
 必要时可在 `tests/conftest.py` 中统一加载 `.env`。
+
+---
+
+## Campaign 存储模式（重要）
+
+用于控制 Postgres 不可用时，广告策略模块是否允许使用内存兜底：
+
+- `ENABLE_MEMORY_FALLBACK=true`（默认）：启用内存兜底，适合本地开发联调。
+- `ENABLE_MEMORY_FALLBACK=false`：禁用内存兜底，数据库不可用时直接返回 `503 database unavailable`。
+
+推荐配置：
+
+- 本地开发（local/dev）：`ENABLE_MEMORY_FALLBACK=true`
+- 测试与生产（staging/prod）：`ENABLE_MEMORY_FALLBACK=false`
+
+快速验证：
+
+1. 先停止 Postgres。
+2. 设置 `ENABLE_MEMORY_FALLBACK=true`，调用 `POST /api/v1/campaigns/strategy`，应可正常返回。
+3. 设置 `ENABLE_MEMORY_FALLBACK=false`，调用同一接口，应返回 `503`。
