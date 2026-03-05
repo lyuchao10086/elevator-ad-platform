@@ -1,143 +1,153 @@
-# Cloud Backend (FastAPI)
+﻿# Cloud Backend (FastAPI)
 
-本目录为 **电梯广告投放系统 · 云端业务控制中心**，负责：
+本目录是电梯广告投放系统的云端控制平面（control-plane），负责：
 
-- 设备管理（注册 / 状态）
-- 广告素材管理（上传 / 转码）
-- 投放活动与策略生成（Campaign & Schedule）
-- 为 Edge 端与 Web 端提供统一的 API 服务
-
-当前阶段为 **FastAPI 项目骨架 + API 入口初始化**，不包含完整业务逻辑。
+- 设备管理（注册、状态、远程控制）
+- 素材管理（上传、状态流转、转码回调）
+- 广告策略管理（策略生成、发布、日志、版本与回滚）
+- 对 Web 端与网关提供统一 API
 
 ---
 
 ## 技术栈
 
-- Python ≥ 3.10
-- FastAPI
-- Uvicorn
-- Pydantic
-
-后续计划接入：
-- SQLAlchemy + PostgreSQL
-- Celery + Redis（异步任务，如转码、日志处理）
+- Python >= 3.10
+- FastAPI / Uvicorn
+- Pydantic v2
+- PostgreSQL（持久化）
+- Redis（与网关联动）
 
 ---
 
-## 目录结构说明
+## 目录结构
 
 ```text
 control-plane/
 ├─ app/
-│  ├─ main.py            # FastAPI 应用入口
-│  ├─ api/               # API 路由层
-│  │  └─ v1/
-│  │     ├─ router.py    # v1 API 聚合
-│  │     └─ endpoints/   # 各业务模块接口
-│  ├─ core/              # 配置 / 安全 / 通用工具
-│  ├─ db/                # 数据库连接与会话（预留）
-│  ├─ models/            # ORM 模型（预留）
-│  ├─ schemas/           # Pydantic 数据模型
-│  ├─ services/          # 业务逻辑层
-│  └─ tasks/             # 异步任务（Celery，预留）
-├─ docker-compose.yml    # 本地开发依赖（预留）
-├─ pyproject.toml        # Python 依赖定义
-├─ .env.example          # 环境变量示例
-└─ README.md
+│  ├─ main.py
+│  ├─ api/v1/
+│  │  ├─ router.py
+│  │  └─ endpoints/
+│  ├─ core/
+│  ├─ schemas/
+│  └─ services/
+├─ data/
+├─ docs/
+├─ tests/
+├─ pyproject.toml
+├─ pytest.ini
+├─ .env.example
+└─ READEME.md
 ```
 
 ---
 
-## 本地开发与调试
+## 本地开发
 
-> 说明：所需环境依赖组可查看`pyproject.toml` 
-> python环境下请先用 venv 创建隔离环境，然后按需安装依赖。
-> 另外，也可以用conda配置依赖环境
-
-### 1) 建议的基础依赖
+### 1) 安装依赖（venv）
 
 ```bash
 python -m venv .venv
 # Windows
 .venv\Scripts\activate
-
 pip install fastapi uvicorn pydantic pydantic-settings
 pip install requests redis python-multipart psycopg2-binary
+pip install pytest pytest-asyncio httpx
 ```
 
-#### Conda 环境（推荐 conda-forge）
+### 2) 安装依赖（Conda，推荐 conda-forge）
 
 ```bash
 conda create -n elevator-control-plane python=3.10 -y
 conda activate elevator-control-plane
-conda install -c conda-forge fastapi uvicorn pydantic pydantic-settings requests redis python-multipart psycopg2 -y
+conda install -c conda-forge fastapi uvicorn pydantic pydantic-settings requests redis python-multipart psycopg2 pytest pytest-asyncio httpx -y
 ```
 
-### 2) 启动服务（调试模式）
+### 3) 启动服务
 
 ```bash
 python -m uvicorn app.main:app --reload --port 8000
 ```
 
-常用调试接口：
-- `GET /health`：服务存活检查
-- `GET /api/debug/db/ping`：数据库连接检查（需先配置 DB）
-- `GET /api/v1/devices/remote/{device_id}/snapshot`：触发截图（需 Go 网关在线）
+常用接口：
 
-数据库与环境变量请参考：`control-plane/DB_SETUP.md`。
+- `GET /health`
+- `GET /api/debug/db/ping`
+- `GET /api/v1/devices/remote/{device_id}/snapshot`
+
+数据库配置请参考：`control-plane/DB_SETUP.md`
 
 ---
 
-## 测试（当前为预留）
+## 测试
 
-> 目前项目尚未包含 `tests/`，但建议按以下依赖与命令准备测试环境。
-
-### 1) 测试依赖
+### 1) 运行全部测试
 
 ```bash
-pip install pytest pytest-asyncio httpx
+python -m pytest -c pytest.ini
 ```
 
-### 2) 运行测试
+### 2) 运行广告策略关键链路测试
 
 ```bash
-python -m pytest -q
+python -m pytest -c pytest.ini tests/api/test_campaigns_flow.py
 ```
 
-### 3) 推荐测试目录结构（建议）
+当前已覆盖：
 
-```text
-control-plane/
-└─ tests/
-   ├─ api/
-   ├─ services/
-   └─ conftest.py
-```
-
-### 4) 集成依赖提示
-
-如测试依赖 Postgres / Redis，请先启动对应服务，并配置：
-- `PG_HOST / PG_PORT / PG_USER / PG_PASSWORD / PG_DB`
-- `REDIS_HOST / REDIS_PORT / REDIS_DB`
-
-必要时可在 `tests/conftest.py` 中统一加载 `.env`。
+- 策略生成（含 DB 故障 + fallback 行为）
+- 发布成功路径
+- 发布校验失败（400）
+- 网关下发全失败（502）
+- DB 不可用（503）
+- 失败重试异常路径（503/502）
+- 回滚发布成功路径
+- publish / rollback 幂等行为
 
 ---
 
 ## Campaign 存储模式（重要）
 
-用于控制 Postgres 不可用时，广告策略模块是否允许使用内存兜底：
+用于控制 Postgres 不可用时，是否允许内存兜底：
 
-- `ENABLE_MEMORY_FALLBACK=true`（默认）：启用内存兜底，适合本地开发联调。
-- `ENABLE_MEMORY_FALLBACK=false`：禁用内存兜底，数据库不可用时直接返回 `503 database unavailable`。
+- `ENABLE_MEMORY_FALLBACK=true`（默认）：启用内存兜底，适合本地联调
+- `ENABLE_MEMORY_FALLBACK=false`：禁用内存兜底，DB 不可用时返回 `503 database unavailable`
 
-推荐配置：
+推荐：
 
-- 本地开发（local/dev）：`ENABLE_MEMORY_FALLBACK=true`
-- 测试与生产（staging/prod）：`ENABLE_MEMORY_FALLBACK=false`
+- local/dev：`ENABLE_MEMORY_FALLBACK=true`
+- staging/prod：`ENABLE_MEMORY_FALLBACK=false`
 
-快速验证：
+---
 
-1. 先停止 Postgres。
-2. 设置 `ENABLE_MEMORY_FALLBACK=true`，调用 `POST /api/v1/campaigns/strategy`，应可正常返回。
-3. 设置 `ENABLE_MEMORY_FALLBACK=false`，调用同一接口，应返回 `503`。
+## 当前进度（设备与内容管理 + 广告策略）
+
+已完成：
+
+- 素材上传与状态流转规则对齐
+- 转码回调字段（type/output_path 等）对齐
+- 设备注册入库与远程命令链路打通
+- 广告策略核心闭环：
+  - `POST /campaigns/strategy`
+  - `POST /campaigns/{id}/publish`
+  - `GET /campaigns/{id}/publish-logs`
+  - `GET /campaigns/{id}/versions`
+  - `POST /campaigns/{id}/rollback`
+  - `POST /campaigns/{id}/retry-failed`
+- 发布前校验增强（素材、设备、时段、优先级、重复项）
+- 错误语义标准化（400/404/502/503）
+- 幂等一致性增强（publish/rollback 二次调用不重复下发）
+
+待完成（下一步）：
+
+- `retry-failed` 的更细粒度幂等约束（按批次重试行为再收敛）
+- 端到端联调脚本再沉淀（gateway + redis + db）
+- 最终交付文档整理（运行手册、故障排查、已知限制）
+
+---
+
+## 参考文档
+
+- 联调验收清单：`control-plane/docs/CAMPAIGN_E2E_CHECKLIST.md`
+- 数据库配置：`control-plane/DB_SETUP.md`
+- 依赖定义：`control-plane/pyproject.toml`
