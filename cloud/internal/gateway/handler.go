@@ -15,7 +15,7 @@ import (
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	"github.com/redis/go-redis/v9"
+	// "github.com/redis/go-redis/v9"
 )
 
 // Handler 结构体：包含了这个接口层需要用到的“工具”
@@ -23,15 +23,15 @@ type Handler struct {
 	Manager  *DeviceManager     // 引用之前在 manager.go 里写的连接管理器
 	upgrader websocket.Upgrader // 用于将普通的 HTTP 协议升级为 WebSocket 协议
 	bucket   *oss.Bucket
-	// kafka    *KafkaProducer // ⭐ 新增
+	kafka    *KafkaProducer // ⭐ 新增
 }
 
 // NewHandler 是一个构造函数，方便 main.go 调用来创建一个新的处理器
-func NewHandler(m *DeviceManager, bucket *oss.Bucket) *Handler {
+func NewHandler(m *DeviceManager, bucket *oss.Bucket, kafka *KafkaProducer) *Handler {
 	return &Handler{
 		Manager: m,
 		bucket:  bucket,
-		// kafka:   kafka,
+		kafka:   kafka,
 		upgrader: websocket.Upgrader{
 			// 解决跨域问题，允许所有来源的连接（测试环境常用）
 			CheckOrigin: func(r *http.Request) bool { return true },
@@ -238,24 +238,47 @@ func (h *Handler) handleLogReport(deviceID string, payload json.RawMessage) {
 	// 		)
 	// 	}
 	// }
+	// 4️⃣ Kafka 投递
+	if h.kafka != nil {
 
-	// 4️⃣ Redis Stream 投递
-	data, _ := json.Marshal(logPayload)
-	streamName := "play_log_stream"
-	if h.Manager.rdb != nil {
-		//id=<毫秒时间戳>-<同一毫秒内的序号>
-		id, err := h.Manager.rdb.XAdd(ctx, &redis.XAddArgs{
-			Stream: streamName,
-			Values: map[string]interface{}{"data": string(data)},
-		}).Result()
+		data, err := json.Marshal(logPayload)
 		if err != nil {
-			log.Printf("[playlog][redis_failed] device=%s err=%v", deviceID, err)
-		} else {
-			log.Printf("[playlog][redis_ok] device=%s stream_id=%s", deviceID, id)
+			log.Printf("[playlog][marshal_failed] %v", err)
+			return
 		}
-	} else {
-		log.Printf("[playlog][redis_missing] Redis 未连接")
+
+		err = h.kafka.Send(deviceID, data)
+		if err != nil {
+			log.Printf(
+				"[playlog][kafka_failed] device=%s err=%v",
+				deviceID, err,
+			)
+		} else {
+			log.Printf(
+				"[playlog][kafka_ok] device=%s",
+				deviceID,
+			)
+		}
 	}
+	// // 4️⃣ Redis Stream 投递
+	// data, _ := json.Marshal(logPayload)
+	// streamName := "play_log_stream"
+	// if h.Manager.rdb != nil {
+	// 	//id=<毫秒时间戳>-<同一毫秒内的序号>
+	// 	id, err := h.Manager.rdb.XAdd(ctx, &redis.XAddArgs{
+	// 		Stream: streamName,
+	// 		MaxLen: 10000, //最多保留10000条，防止内存爆炸
+	// 		Approx: true,  //近似剪裁，大概保留10000~10500条数据
+	// 		Values: map[string]interface{}{"data": string(data)},
+	// 	}).Result()
+	// 	if err != nil {
+	// 		log.Printf("[playlog][redis_failed] device=%s err=%v", deviceID, err)
+	// 	} else {
+	// 		log.Printf("[playlog][redis_ok] device=%s stream_id=%s", deviceID, id)
+	// 	}
+	// } else {
+	// 	log.Printf("[playlog][redis_missing] Redis 未连接")
+	// }
 }
 
 // Python / Postman 调用：请求设备截图

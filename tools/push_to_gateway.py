@@ -117,7 +117,7 @@ def consume_stream():
     stream_name = "play_log_stream"
     group_name = "cloud_group"
     consumer_name = "consumer_1"
-
+    
     while True:
         # 从消费组读取消息
         resp = r.xreadgroup(
