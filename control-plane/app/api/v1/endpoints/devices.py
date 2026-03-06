@@ -44,61 +44,28 @@ def register_device(payload: DeviceRegisterRequest):
 
 @router.get("/", summary="List devices")
 def list_devices(q: str = None, page: int = 1, page_size: int = 20):
-    """
-    返回设备列表：优先从数据库分页读取，再尝试合并 Redis 中在线状态。
-    如果数据库为空或不可用，则尝试从 Redis 的 `auth:*` key 扫描生成临时列表。
-    Redis 的错误会被吞掉（降级到纯 DB 响应），避免前端因为 Redis 可用但无数据而显示空列表。
-    """
     try:
-        if page < 1:
-            page = 1
-        if page_size < 1 or page_size > 1000:
-            page_size = 20
         offset = (page - 1) * page_size
-
-        items = db_service.list_devices(limit=page_size, offset=offset, q=q)
+        # 1. 先从数据库拿到基础列表
         total = db_service.count_devices(q=q)
+        items = db_service.list_devices(limit=page_size, offset=offset, q=q)
 
-        # 尝试合并 Redis 中的在线状态（best-effort）
+        # 2. 核心修改：只要 Redis 连接正常，就强制用 Redis 状态覆盖 SQL 状态
         if rdb:
-            try:
-                for it in items:
-                    did = it.get('device_id') or it.get('id')
-                    if not did:
-                        it['status'] = it.get('status', 'unknown')
-                        continue
-                    online_key = f"device:online:{did}"
-                    try:
-                        it['status'] = 'online' if rdb.exists(online_key) else it.get('status', 'offline')
-                    except Exception:
-                        it['status'] = it.get('status', 'offline')
-            except Exception:
-                # Redis 读取失败时忽略，返回 DB 数据
-                pass
-
-        # 如果 DB 没有任何设备，则尝试从 Redis 的 auth:* 生成临时列表（方便 dev mock）
-        if (not items or len(items) == 0) and rdb:
-            try:
-                keys = rdb.keys('auth:*')
-                items = []
-                for k in keys:
-                    d_id = k.split(':')[-1]
-                    status = 'online' if rdb.exists(f'device:online:{d_id}') else 'offline'
-                    items.append({
-                        'device_id': d_id,
-                        'name': f'电梯_{d_id[-4:]}',
-                        'status': status,
-                        'firmware_version': 'v1.0.0'
-                    })
-                total = len(items)
-            except Exception:
-                # 忽略 Redis 错误
-                pass
-
+            for it in items:
+                d_id = it.get('device_id')
+                if d_id:
+                    # 检查 Redis 中是否存在该设备的心跳 Key
+                    # 格式必须和你 Go 网关写入的一致，例如 device:online:ELEVATOR_123456
+                    is_online = rdb.exists(f"device:online:{d_id}")
+                    it['status'] = 'online' if is_online else 'offline'
+        
+        # 3. (可选) 如果你想让 Redis 里那台不在 SQL 里的 ELEV_001 也显示出来
+        # 可以在这里做逻辑合并，但通常建议以数据库为准，Redis 只提供“在线”状态
+        
         return {"total": total, "items": items}
     except Exception as e:
         return {"total": 0, "items": [], "error": str(e)}
-# ... 你原有的代码 (rdb, register_device 等) ...
 
 # --- 在文件末尾添加这个函数 ---
 @router.get("") # 这样就对应了 /api/v1/devices
