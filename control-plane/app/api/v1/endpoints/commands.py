@@ -5,6 +5,7 @@ import uuid
 
 # 导入你之前调通的截图服务
 from app.services.device_snapshot_service import request_device_snapshot, send_remote_command
+from app.services import db_service
 
 router = APIRouter()
 
@@ -13,17 +14,39 @@ router = APIRouter()
 mock_command_db = []
 
 @router.get("")
-async def list_commands(limit: int = 20):
+async def list_commands(limit: int = 20, offset: int = 0, device_id: str = None, action: str = None, from_ts: int = None, to_ts: int = None, q: str = None):
     """
-    获取指令历史列表
-    前端 Commands.vue 会自动调用这个接口
+    获取指令历史列表，优先从数据库读取 `command_logs`，若 DB 不可用回退到内存 mock。
+    支持分页与按设备过滤。
     """
-    # 按时间倒序返回
-    sorted_cmds = sorted(mock_command_db, key=lambda x: x.get("send_ts", 0), reverse=True)
-    return {
-        "items": sorted_cmds[:limit],
-        "total": len(mock_command_db)
-    }
+    try:
+        rows = db_service.list_commands(limit=limit, offset=offset, q=q, device_id=device_id, action=action, from_ts=from_ts, to_ts=to_ts)
+        # debug info: print how many rows returned and sample
+        try:
+            print(f"[commands] read from DB, count={len(rows)}")
+            if len(rows):
+                import json
+                sample = dict(rows[0])
+                print("[commands] sample:", json.dumps(sample, default=str)[:1000])
+        except Exception:
+            pass
+        # compute total count matching filters for correct pagination
+        try:
+            total = db_service.count_commands(q=q, device_id=device_id, action=action, from_ts=from_ts, to_ts=to_ts)
+        except Exception:
+            total = len(rows)
+        return {"items": rows, "total": total}
+    except Exception as e:
+        # 回退到内存 mock，保持原有行为
+        print(f"[commands] db read failed, fallback to mock: {e}")
+        sorted_cmds = sorted(mock_command_db, key=lambda x: x.get("send_ts", 0), reverse=True)
+        filtered = sorted_cmds
+        if device_id:
+            filtered = [c for c in filtered if c.get('device_id') == device_id]
+        if q:
+            ql = q.lower()
+            filtered = [c for c in filtered if ql in (str(c.get('cmd_id') or '')).lower() or ql in (str(c.get('device_id') or '')).lower() or ql in (str(c.get('action') or '')).lower()]
+        return {"items": filtered[offset:offset+limit], "total": len(filtered)}
 
 @router.post("")
 async def send_command(payload: Dict[str, Any] = Body(...)):
@@ -60,7 +83,20 @@ async def send_command(payload: Dict[str, Any] = Body(...)):
             # 2. 拿到结果，更新记录
             record["status"] = "success"
             record["result"] = img_url # 这个 URL 会被前端拿到并展示
-            mock_command_db.append(record)
+            # 尝试持久化到 DB，若失败则回退到内存 mock
+            try:
+                db_service.insert_command({
+                    "cmd_id": record.get("cmd_id"),
+                    "device_id": record.get("device_id"),
+                    "action": record.get("action"),
+                    "params": payload.get('params', {}),
+                    "status": record.get("status"),
+                    "result": record.get("result"),
+                    "send_ts": record.get("send_ts")
+                })
+            except Exception as e:
+                print(f"[commands] insert_command failed, fallback to mock: {e}")
+                mock_command_db.append(record)
             
             return {
                 "status": "success",
@@ -71,18 +107,34 @@ async def send_command(payload: Dict[str, Any] = Body(...)):
         else:
             # 对于重启、设置音量等其他指令，尝试调用 Go 网关下发真实指令
             try:
+                # 从前端 payload 里取 params（可能是 dict 或其他可序列化对象）并透传给网关
+                data = payload.get('params', {}) if isinstance(payload, dict) else {}
                 if action == "reboot":
                     # 将前端的 reboot 动作映射为网关/设备端的 REBOOT 命令
-                    send_remote_command(device_id, "REBOOT", "", cmd_id)
+                    send_remote_command(device_id, "REBOOT", data, cmd_id)
+                    print(f"[commands] 重启data:{data}")
                     record["status"] = "sent"
                     record["result"] = "reboot_sent"
                 else:
-                    # 其他动作暂时照旧标记为已下发（可扩展）
-                    send_remote_command(device_id, action.upper(), "", cmd_id)
+                    # 其他动作将 params 一并传输，设备端可从 data 字段读取
+                    send_remote_command(device_id, action.upper(), data, cmd_id)
                     record["status"] = "sent"
                     record["result"] = f"{action}_sent"
 
-                mock_command_db.append(record)
+                # 先持久化到 DB（若可用），再回退到内存
+                try:
+                    db_service.insert_command({
+                        "cmd_id": record.get("cmd_id"),
+                        "device_id": record.get("device_id"),
+                        "action": record.get("action"),
+                        "params": payload.get('params', {}),
+                        "status": record.get("status"),
+                        "result": record.get("result"),
+                        "send_ts": record.get("send_ts")
+                    })
+                except Exception as e:
+                    print(f"[commands] insert_command failed, fallback to mock: {e}")
+                    mock_command_db.append(record)
 
                 return {
                     "status": "success",
@@ -92,7 +144,18 @@ async def send_command(payload: Dict[str, Any] = Body(...)):
             except Exception as e:
                 record["status"] = "failed"
                 record["result"] = str(e)
-                mock_command_db.append(record)
+                try:
+                    db_service.insert_command({
+                        "cmd_id": record.get("cmd_id"),
+                        "device_id": record.get("device_id"),
+                        "action": record.get("action"),
+                        "params": payload.get('params', {}),
+                        "status": record.get("status"),
+                        "result": record.get("result"),
+                        "send_ts": record.get("send_ts")
+                    })
+                except Exception:
+                    mock_command_db.append(record)
                 raise HTTPException(status_code=500, detail=f"下发指令失败: {e}")
     except TimeoutError:
         record["status"] = "timeout"
@@ -120,22 +183,44 @@ async def command_callback(body: Dict[str, Any] = Body(...)):
 
     # 找到对应记录（优先按 cmd_id 匹配）并更新状态
     updated = False
-    for rec in mock_command_db:
-        if cmd_id and rec.get("cmd_id") == cmd_id:
-            rec["status"] = status or rec.get("status")
-            rec["result"] = result or rec.get("result")
-            updated = True
-            break
+    # Try update DB first
+    try:
+        if cmd_id:
+            rows = db_service.update_command_status(cmd_id=cmd_id, status=status, result=result)
+            if rows and rows > 0:
+                print(f"[commands.callback] updated DB by cmd_id={cmd_id}, rows={rows}")
+                updated = True
+    except Exception as e:
+        print(f"[commands.callback] db update by cmd_id failed: {e}")
 
-    # 如果没有 cmd_id，尝试按 device_id 更新最近一条 pending/sent 指令
-    if not updated and device_id:
-        # 按时间倒序找第一条匹配设备且处于 sent/pending 的记录
-        for rec in sorted(mock_command_db, key=lambda x: x.get("send_ts", 0), reverse=True):
-            if rec.get("device_id") == device_id and rec.get("status") in ("sent", "pending"):
+    # If DB not updated, try update in-memory mock by cmd_id
+    if not updated:
+        for rec in mock_command_db:
+            if cmd_id and rec.get("cmd_id") == cmd_id:
                 rec["status"] = status or rec.get("status")
                 rec["result"] = result or rec.get("result")
                 updated = True
                 break
+
+    # 如果没有 cmd_id，尝试按 device_id 更新最近一条 pending/sent 指令
+    if not updated and device_id:
+        # Try DB update by device_id
+        try:
+            rows = db_service.update_command_status(device_id=device_id, status=status, result=result)
+            if rows and rows > 0:
+                print(f"[commands.callback] updated DB by device_id={device_id}, rows={rows}")
+                updated = True
+        except Exception as e:
+            print(f"[commands.callback] db update by device_id failed: {e}")
+
+        # If DB not updated, fall back to in-memory update
+        if not updated:
+            for rec in sorted(mock_command_db, key=lambda x: x.get("send_ts", 0), reverse=True):
+                if rec.get("device_id") == device_id and rec.get("status") in ("sent", "pending"):
+                    rec["status"] = status or rec.get("status")
+                    rec["result"] = result or rec.get("result")
+                    updated = True
+                    break
 
     if not updated:
         # 若没找到记录，仍返回成功以避免网关重试，但记录日志

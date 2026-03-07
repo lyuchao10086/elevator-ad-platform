@@ -46,9 +46,8 @@ class SnapshotCallback(BaseModel):
 async def snapshot_callback(body: SnapshotCallback):
     try:
         # 传递 url 而不是 base64
-        # path = receive_snapshot_callback(body.device_id, body.snapshot_url)
-        #改为异步调用
-        path = await receive_snapshot_callback(body.device_id, body.snapshot_url)
+        # 改为异步调用，并把可选的 req_id 透传给 service，以便能按 cmd_id 更新 DB
+        path = await receive_snapshot_callback(body.device_id, body.snapshot_url, body.req_id)
         return {"status": "ok", "url": path}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

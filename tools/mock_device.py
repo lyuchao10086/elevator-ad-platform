@@ -30,6 +30,9 @@ def simulate_elevator(device_id, token): # 增加 token 参数
         is_old_style = (data.get("type") == "snapshot_request")
         is_new_style = (data.get("type") == "command" and data.get("payload") == "SNAPSHOT")
 
+        # 逻辑 C: 通用 command（重启、设置音量、插播等）
+        is_command = (data.get("type") == "command")
+
         if is_old_style or is_new_style:
             # 统一提取 req_id
             req_id = data.get("req_id", "unknown") 
@@ -64,6 +67,51 @@ def simulate_elevator(device_id, token): # 增加 token 参数
             
             ws.send(json.dumps(snapshot_msg))
             print(f"[{device_id}] ✅ 已上传截图回复 (req_id: {req_id})")
+        elif is_command:
+            # 处理通用 command，模拟设备执行并回执 command_response
+            cmd = (data.get("payload") or "").upper()
+            cmd_id = data.get("cmd_id") or ""
+            cmd_data = data.get("data") or {}
+            print(f"[{device_id}] mock设备收到通用命令: {cmd} (cmd_id={cmd_id}) data={cmd_data}")
+
+            # 模拟执行延迟
+            time.sleep(1)
+
+            # 根据命令构造结果
+            result = "ok"
+            if cmd == 'REBOOT':
+                result = 'reboot_ok'
+            elif cmd == 'SET_VOLUME' or cmd == 'SET_VOLUME'.upper():
+                # 支持两种key：volume 或 params.volume
+                vol = None
+                mute = None
+                if isinstance(cmd_data, dict):
+                    vol = cmd_data.get('volume')
+                    mute = cmd_data.get('mute')
+                result = f"set_volume:{vol}|mute:{mute}"
+            elif cmd == 'INSERT_PLAY' or cmd == 'INSERT_PLAY'.upper() or cmd == 'INSERT_PLAY'.lower():
+                mid = None
+                priority = None
+                if isinstance(cmd_data, dict):
+                    mid = cmd_data.get('material_id') or cmd_data.get('material')
+                    priority = cmd_data.get('priority')
+                result = f"insert_play:{mid}|priority:{priority}"
+            else:
+                result = f"{cmd}_ok"
+
+            resp = {
+                "type": "command_response",
+                "device_id": device_id,
+                "req_id": data.get("req_id", ""),
+                "ts": int(time.time()),
+                "payload": {
+                    "cmd_id": cmd_id,
+                    "status": "success",
+                    "result": result
+                }
+            }
+            ws.send(json.dumps(resp))
+            print(f"[{device_id}] ✅ 已发送 command_response (cmd_id={cmd_id}) result={result}")
 
     def on_error(ws, error):
         print(f"[{device_id}] 错误: {error}")
@@ -115,13 +163,36 @@ def simulate_elevator(device_id, token): # 增加 token 参数
 
 if __name__ == "__main__":
     # --- 关键：在这里填入 Postman /register 接口给你的信息 ---
-    # 你可以填多组，模拟多台真实注册过的设备
-    my_real_devices = [
-        {"id": "ELEV_001", "token": "sk_15b3acb1b0b84b01be6c7085e1271837"},
-        # 如果有第二台，接着写：
-        # {"id": "dev_xyz789", "token": "tok_999999"}
-    ]
-    
+    # 尝试从 Redis 中读取已注册设备（key set: registered_devices, token 保存在 auth:<device_id>）
+    import os
+    my_real_devices = []
+    try:
+        use_redis = os.environ.get('USE_REDIS_DEVICES', '1')
+        if use_redis in ('1', 'true', 'True', 'TRUE'):
+            import redis
+            rdb = redis.Redis(host=os.environ.get('REDIS_HOST','localhost'), port=int(os.environ.get('REDIS_PORT','6379')), db=int(os.environ.get('REDIS_DB','0')), decode_responses=True)
+            ids = []
+            try:
+                ids = list(rdb.smembers('registered_devices') or [])
+            except Exception:
+                ids = []
+            for did in ids:
+                try:
+                    token = rdb.get(f'auth:{did}')
+                    if token:
+                        my_real_devices.append({ 'id': did, 'token': token })
+                except Exception:
+                    continue
+    except Exception:
+        my_real_devices = []
+
+    # 如果 Redis 中没有可用设备，退回到硬编码示例
+    if not my_real_devices:
+        my_real_devices = [
+            {"id": "ELEV_001", "token": "sk_15b3acb1b0b84b01be6c7085e1271837"},
+            {"id": "ELEV_010", "token": "sk_15b3acb1b0b84b01be6c7085e1271865"},
+        ]
+
     threads = []
     for dev in my_real_devices:
         # 把 ID 和 Token 都传进去

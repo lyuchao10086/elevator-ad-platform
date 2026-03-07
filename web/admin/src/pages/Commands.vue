@@ -157,6 +157,96 @@
         </div>
       </div>
     </el-card>
+    
+    <!-- 指令日志表格 -->
+    <el-card style="margin-top:16px">
+      <div style="display:flex;align-items:center;gap:12px;justify-content:flex-start">
+        <h3 style="margin:0">操作日志</h3>
+        <div style="display:flex;gap:8px;align-items:center;margin-left:8px">
+          <el-select v-model="logFilterDevice" placeholder="设备号" clearable size="small" style="width:220px">
+            <el-option v-for="d in devices" :key="d.device_id" :label="(d.name ? d.name + ' · ' : '') + d.device_id" :value="d.device_id" />
+          </el-select>
+          <el-select v-model="logFilterAction" placeholder="指令" clearable size="small" style="width:140px">
+            <el-option v-for="a in actions" :key="a.key" :label="a.title" :value="a.key" />
+          </el-select>
+          <el-button type="primary" size="small" @click="fetchCommandLogs(1)">搜索</el-button>
+          <el-button type="text" size="small" @click="fetchCommandLogs(logsPage)">刷新</el-button>
+        </div>
+      </div>
+
+      <div style="margin-top:12px">
+      <el-table :data="commandLogs" style="width:100%" v-loading="logsLoading" :row-key="row => row.id">
+          <!-- <el-table-column prop="id" label="ID" width="70" /> -->
+          <el-table-column prop="cmd_id" label="指令代码" width="220" />
+          <el-table-column prop="device_id" label="设备号" width="140" />
+          <el-table-column prop="action" label="指令" width="120" />
+          <el-table-column label="指令信息">
+            <template #default="{ row }">
+              <div style="max-width:360px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ formatParams(row.action, row.params) }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="状态" label="Status" width="110">
+            <template #default="{ row }">
+              <el-tag :type="statusTagType(row.status)">{{ row.status }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="执行结果">
+            <template #default="{ row }">
+              <div style="max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ shortJson(row.result) }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column label="指令时间" width="160">
+            <template #default="{ row }">
+              {{ formatTs(row.send_ts) }}
+            </template>
+          </el-table-column>
+          <!-- <el-table-column label="Created At" width="170">
+            <template #default="{ row }">
+              {{ row.created_at || '-' }}
+            </template>
+          </el-table-column> -->
+          <!-- <el-table-column label="操作" width="120">
+            <template #default="{ row }">
+              <el-button type="text" size="small" @click="showDetail(row)">详情</el-button>
+            </template>
+          </el-table-column> -->
+        </el-table>
+          <!-- 分页控件 -->
+          <div style="margin-top:12px;display:flex;justify-content:flex-end;align-items:center">
+            <el-pagination
+              background
+              :current-page="logsPage"
+              :page-size="logsPageSize"
+              layout="prev, pager, next, jumper, ->, total"
+              :total="logsTotal"
+              @current-change="fetchCommandLogs"
+            />
+          </div>
+        </div>
+    </el-card>
+
+    <!-- 指令详情弹窗 -->
+    <el-dialog v-model:visible="detailVisible" title="指令详情" width="800px">
+      <div v-if="detailRow">
+        <div style="display:flex;gap:12px;flex-wrap:wrap">
+          <div><strong>ID:</strong> {{ detailRow.id }}</div>
+          <div><strong>Cmd ID:</strong> {{ detailRow.cmd_id }}</div>
+          <div><strong>Device:</strong> {{ detailRow.device_id }}</div>
+          <div><strong>Action:</strong> {{ detailRow.action }}</div>
+          <div><strong>Status:</strong> <el-tag :type="statusTagType(detailRow.status)">{{ detailRow.status }}</el-tag></div>
+          <div><strong>Send TS:</strong> {{ formatTs(detailRow.send_ts) }}</div>
+        </div>
+
+        <div style="margin-top:12px">
+          <div style="font-weight:600">Params</div>
+          <pre style="background:#fafbff;padding:8px;border-radius:4px;max-height:280px;overflow:auto">{{ JSON.stringify(detailRow.params, null, 2) }}</pre>
+        </div>
+        <div style="margin-top:8px">
+          <div style="font-weight:600">Result</div>
+          <pre style="background:#fafbff;padding:8px;border-radius:4px;max-height:280px;overflow:auto">{{ JSON.stringify(detailRow.result, null, 2) }}</pre>
+        </div>
+      </div>
+    </el-dialog>
 
     <!-- 确认弹窗 -->
     <el-dialog v-model:visible="confirmVisible" title="确认下发指令" width="600px">
@@ -173,24 +263,7 @@
       </template>
     </el-dialog>
 
-    <!-- 近期指令时间轴 -->
-    <el-card style="margin-top:16px">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <h3 style="margin:0">近期指令（时间轴）</h3>
-        <el-button type="text" @click="fetchCommands">刷新</el-button>
-      </div>
-      <el-timeline style="margin-top:12px">
-        <el-timeline-item v-for="cmd in commands" :key="cmd.cmd_id" :timestamp="formatTs(cmd.send_ts)" :placement="'top'">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <div>
-              <div style="font-weight:600">{{ cmd.action }} · {{ cmd.target_device_id || cmd.device_group_id || '多设备' }}</div>
-              <div style="font-size:13px;color:#7b8793">状态：<el-tag :type="statusTagType(cmd.status)">{{ cmd.status }}</el-tag></div>
-            </div>
-            <div style="width:240px;text-align:right;color:#6b7786;font-size:12px">{{ cmd.result || '' }}</div>
-          </div>
-        </el-timeline-item>
-      </el-timeline>
-    </el-card>
+    
   </div>
 </template>
 
@@ -302,6 +375,7 @@ export default {
         totalDevices.value = data.total || list.length
       }catch(e){ console.warn('fetch devices failed', e); devices.value = []; totalDevices.value = 0 }
       finally{ deviceLoading.value = false }
+
     }
 
     function onDeviceQueryChange(){
@@ -473,13 +547,44 @@ export default {
           }
         }else{
           const res = await sendCommand(payload)
+          const cmdId = res.data?.cmd_id || payload.cmd_id
           // optimistic feedback
-          alert('指令已下发: ' + (res.data?.cmd_id || payload.cmd_id))
+          alert('指令已下发: ' + cmdId)
+          // 启动轮询，等待网关/设备回调更新指令状态（非 capture）
+          pollCommandStatus(cmdId).catch(e=>{ console.warn('pollCommandStatus error', e) })
         }
         await fetchCommands()
         activeStep.value = 0
       }catch(e){ console.error('onSend failed', e); alert('下发失败：' + (e && e.message || e)) }
       finally{ sending.value = false }
+    }
+
+    // 轮询检查指定 cmd_id 的状态（使用 listCommands 查询内存记录）
+    async function pollCommandStatus(cmdId, timeoutSec = 30, intervalMs = 1000){
+      const start = Date.now()
+      while((Date.now() - start) / 1000 < timeoutSec){
+        try{
+          const r = await listCommands({ limit: 100 })
+          const items = r.data?.items || r.data || []
+          const rec = items.find(x => x.cmd_id === cmdId)
+          if(rec){
+            if(rec.status === 'success'){
+              // 可选：在前端展示更友好的消息
+              alert('指令执行成功: ' + cmdId)
+              await fetchCommands()
+              return rec
+            }
+            if(rec.status === 'failed' || rec.status === 'timeout'){
+              alert('指令执行失败: ' + cmdId + '，状态：' + rec.status)
+              await fetchCommands()
+              return rec
+            }
+          }
+        }catch(err){ console.warn('poll error', err) }
+        await new Promise(res => setTimeout(res, intervalMs))
+      }
+      alert('等待指令结果超时: ' + cmdId)
+      return null
     }
 
     async function fetchCommands(){
@@ -489,12 +594,130 @@ export default {
       }catch(e){ console.warn('fetch commands failed', e) }
     }
 
+    // 指令日志（表格）相关
+    const commandLogs = ref([])
+    const logsLoading = ref(false)
+    const logsPage = ref(1)
+    const logsPageSize = ref(20)
+    const logsTotal = ref(0)
+    // filters for command logs
+    const logFilterDevice = ref('')
+    const logFilterAction = ref('')
+
+    async function fetchCommandLogs(page = logsPage.value){
+      logsLoading.value = true
+      try{
+        const limit = logsPageSize.value
+        const offset = (page - 1) * limit
+        // build params with filters
+        const params = { limit: limit, offset: offset }
+        
+        if(logFilterDevice.value) params.device_id = logFilterDevice.value
+        if(logFilterAction.value) params.action = logFilterAction.value
+        // time filter removed from UI; backend still supports from_ts/to_ts if needed
+        const r = await listCommands(params)
+        const items = r.data?.items || r.data || []
+        logsTotal.value = r.data?.total ?? (Array.isArray(items) ? items.length : 0)
+        commandLogs.value = (items || []).map(it => ({
+          id: it.id || it._id || it.db_id || it.cmd_id,
+          cmd_id: it.cmd_id,
+          device_id: it.device_id || it.target_device_id || (it.target_device_ids && Array.isArray(it.target_device_ids)? it.target_device_ids.join(',') : undefined),
+          action: it.action,
+          params: it.params || it.params_json || it.params || it.params_text || it.params,
+          status: it.status,
+          result: it.result || it.data || it.response || '',
+          send_ts: it.send_ts,
+          created_at: it.created_at,
+          updated_at: it.updated_at
+        }))
+        logsPage.value = page
+      }catch(e){ console.warn('fetch command logs failed', e) }
+      finally{ logsLoading.value = false }
+    }
+
+    function clearLogFilters(){
+      // former clear button now acts as refresh; keep for compatibility
+      fetchCommandLogs(logsPage.value)
+    }
+
+    function shortJson(v){
+      try{
+        if(v===null||v===undefined) return '-'
+        const s = typeof v === 'string' ? v : JSON.stringify(v)
+        return s.length>120 ? s.slice(0,120)+'...' : s
+      }catch(e){ return '-' }
+    }
+
+    // 缓存
+    const materialNames = reactive({})
+    async function ensureMaterialName(id){
+      try{
+        if(!id) return
+        if(materialNames[id] !== undefined) return
+        // 先在已加载的 materials 中查找
+        const fromList = (materials.value || []).find(m => m.material_id === id)
+        if(fromList){ materialNames[id] = fromList.file_name || fromList.material_id; return }
+        // 后端按 q 查询，尽量找到匹配项
+        const r = await api.get('/v1/materials', { params: { q: id, page: 1, page_size: 5 } }).catch(()=>null)
+        const items = r && (r.data?.items || r.data) || []
+        const found = (Array.isArray(items) ? items.find(it => it.material_id === id) : null) || (Array.isArray(items) && items[0])
+        materialNames[id] = found ? (found.file_name || found.material_id) : id
+      }catch(e){ materialNames[id] = id }
+    }
+
+    // 将 params/result 按动作格式化为中文可读文本
+    function formatParams(action, params){
+      try{
+        if(params===null||params===undefined) return '-'
+        let p = params
+        if(typeof p === 'string'){
+          try{ p = JSON.parse(p) }catch(e){ /* keep as string */ }
+        }
+        if(action === 'set_volume'){
+          if(p.volume !== undefined) return `声音调整至：${p.volume}`
+          if(p.mute !== undefined) return p.mute ? '静音' : '取消静音'
+          return shortJson(p)
+        }
+        if(action === 'reboot'){
+          return '重启设备'
+        }
+        if(action === 'capture'){
+          if(p.save_to) return `截屏并保存至：${p.save_to}`
+          return '截屏请求'
+        }
+        if(action === 'insert_play'){
+          if(p.material_id){
+            const mid = p.material_id
+            const name = materialNames[mid]
+            if(name) return `插播素材：${name}`
+            // 后台异步加载名称以便下次显示更友好
+            ensureMaterialName(mid)
+            return `插播素材：${mid}`
+          }
+          return shortJson(p)
+        }
+        // 默认展示常见字段或简短 JSON
+        if(typeof p === 'object'){
+          if(p.volume !== undefined) return `声音：${p.volume}`
+          if(p.material_id) return `素材：${p.material_id}`
+          if(p.save_to) return `保存到：${p.save_to}`
+          return shortJson(p)
+        }
+        return String(p)
+      }catch(e){ return shortJson(params) }
+    }
+
+    const detailVisible = ref(false)
+    const detailRow = ref(null)
+    function showDetail(r){ detailRow.value = r; detailVisible.value = true }
+
     function formatTs(ts){ if(!ts) return ''; try{ return new Date(ts*1000).toLocaleString() }catch(e){ return ts } }
 
     onMounted(()=>{
       // prefill from query
       if(route.query.target_device_id){ selectedDevices.value = [route.query.target_device_id] }
       fetchDevices(); fetchCommands()
+      fetchCommandLogs()
     })
 
     // react to route changes so opening commands while already mounted still picks target
@@ -515,10 +738,16 @@ export default {
       onDeviceQueryChange,
       fetchDevices, onDevicePage, selectAllVisible, clearSelection, formatCoord, statusTagType,
       formatSize,
+      formatTs,
+      formatParams,
+      // log filters
+      logFilterDevice, logFilterAction, clearLogFilters,
       actions, selectedAction, selectAction, previewTemplate, actionTitle, paramTemplate, params, fieldComponent,
       resetParams, expireSec, onPrepareSend, confirmVisible, finalPayloadPreview, onSend, sending, previewOnly, snapshotUrl,
       materials, materialQuery, materialLoading, materialsFiltered, selectMaterial, selectedMaterial, onPreviewMaterial, fetchMaterials, onMaterialQueryChange, materialItemStyle,
       commands, previewJSON, fetchCommands
+      , commandLogs, logsLoading, fetchCommandLogs, shortJson, detailVisible, detailRow, showDetail,
+      logsPage, logsPageSize, logsTotal
     }
   }
 }

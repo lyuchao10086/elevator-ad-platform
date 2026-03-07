@@ -6,6 +6,7 @@
       <el-menu-item index="/devices">设备</el-menu-item>
       <el-menu-item index="/materials">广告素材</el-menu-item>
       <el-menu-item index="/campaigns">投放策略</el-menu-item>
+      <el-menu-item index="/ad-logs">播放日志</el-menu-item>
       <el-menu-item index="/commands">指令中心</el-menu-item>
     </el-menu>
   </aside>
