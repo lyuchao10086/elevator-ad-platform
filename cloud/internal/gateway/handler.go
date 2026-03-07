@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	// "github.com/redis/go-redis/v9"
 )
 
 // Handler 结构体：包含了这个接口层需要用到的“工具”
@@ -21,13 +23,15 @@ type Handler struct {
 	Manager  *DeviceManager     // 引用之前在 manager.go 里写的连接管理器
 	upgrader websocket.Upgrader // 用于将普通的 HTTP 协议升级为 WebSocket 协议
 	bucket   *oss.Bucket
+	kafka    *KafkaProducer // ⭐ 新增
 }
 
 // NewHandler 是一个构造函数，方便 main.go 调用来创建一个新的处理器
-func NewHandler(m *DeviceManager, bucket *oss.Bucket) *Handler {
+func NewHandler(m *DeviceManager, bucket *oss.Bucket, kafka *KafkaProducer) *Handler {
 	return &Handler{
 		Manager: m,
 		bucket:  bucket,
+		kafka:   kafka,
 		upgrader: websocket.Upgrader{
 			// 解决跨域问题，允许所有来源的连接（测试环境常用）
 			CheckOrigin: func(r *http.Request) bool { return true },
@@ -37,7 +41,7 @@ func NewHandler(m *DeviceManager, bucket *oss.Bucket) *Handler {
 
 // 1. 统一消息协议格式
 type DeviceMessage struct {
-	Type     string          `json:"type"` // heartbeat, log, snapshot, command
+	Type     string          `json:"type"` // heartbeat, log, snapshot_response, command
 	DeviceID string          `json:"device_id"`
 	ReqID    string          `json:"req_id"`
 	TS       int64           `json:"ts"`
@@ -48,6 +52,29 @@ type SnapshotPayload struct {
 	Quality    int    `json:"quality"`    // 压缩质量
 	Resolution string `json:"resolution"` // 1920x1080
 	Data       string `json:"data"`       // Base64 图片数据
+}
+type PlayLogPayload struct {
+	LogID string `json:"log_id"`
+	AdID  string `json:"ad_id"`
+
+	PlaybackInfo struct {
+		StartTime  string `json:"start_time"`
+		EndTime    string `json:"end_time"`
+		DurationMs int64  `json:"duration_ms"`
+		StatusCode int    `json:"status_code"`
+		StatusMsg  string `json:"status_msg"`
+	} `json:"playback_info"`
+
+	SecurityCheck struct {
+		ExpectedMD5 string `json:"expected_md5"`
+		ActualMD5   string `json:"actual_md5"`
+	} `json:"security_check"`
+
+	Meta struct {
+		FirmwareVersion string `json:"firmware_version"`
+		ClientIP        string `json:"client_ip"`  // 终端可不传，网关兜底
+		CreatedAt       int64  `json:"created_at"` // 网关填写
+	} `json:"meta"`
 }
 
 // 2. 面向电梯端的 WebSocket 接口
@@ -63,7 +90,7 @@ func (h *Handler) HandleWebsocket(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized) // 返回 401
 		return
 	}
-
+	clientIP := getClientIP(r)
 	// 3. 鉴权通过后的逻辑 (之前的代码保持不变)
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -71,7 +98,7 @@ func (h *Handler) HandleWebsocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.Manager.Register(deviceID, conn)
+	h.Manager.Register(deviceID, conn, clientIP)
 
 	// 进入消息路由循环
 	go h.DispatchMessage(deviceID, conn)
@@ -176,11 +203,82 @@ func (h *Handler) HandleCommand(w http.ResponseWriter, r *http.Request) {
 
 // handleLogReport 处理电梯端上报的播放日志
 func (h *Handler) handleLogReport(deviceID string, payload json.RawMessage) {
-	// 将原始字节直接转换为字符串，这是最稳妥的做法
-	content := string(payload)
+	var logPayload PlayLogPayload
 
-	// 使用标准日志输出，方便调试
-	log.Printf("[日志上报] 设备 ID: %s, 内容: %s", deviceID, content)
+	// 1️⃣ 尝试解析播放日志
+	if err := json.Unmarshal(payload, &logPayload); err != nil {
+		log.Printf(
+			"[playlog][invalid] device=%s err=%v raw=%s",
+			deviceID, err, string(payload),
+		)
+		return
+	}
+
+	// 2️⃣ 网关补充字段(时间、IP)
+	logPayload.Meta.CreatedAt = time.Now().Unix()
+	logPayload.Meta.ClientIP = h.Manager.GetDeviceIP(deviceID)
+
+	// 3️⃣ 运维日志（人能看懂）
+	log.Printf(
+		"[playlog] device=%s log_id=%s ad_id=%s duration=%d status=%d",
+		deviceID,
+		logPayload.LogID,
+		logPayload.AdID,
+		logPayload.PlaybackInfo.DurationMs,
+		logPayload.PlaybackInfo.StatusCode,
+	)
+
+	// // 4️⃣ Kafka 投递
+	// if h.kafka != nil {
+	// 	data, _ := json.Marshal(logPayload)
+	// 	if err := h.kafka.Send(deviceID, data); err != nil {
+	// 		log.Printf(
+	// 			"[playlog][kafka_failed] device=%s err=%v",
+	// 			deviceID, err,
+	// 		)
+	// 	}
+	// }
+	// 4️⃣ Kafka 投递
+	if h.kafka != nil {
+
+		data, err := json.Marshal(logPayload)
+		if err != nil {
+			log.Printf("[playlog][marshal_failed] %v", err)
+			return
+		}
+
+		err = h.kafka.Send(deviceID, data)
+		if err != nil {
+			log.Printf(
+				"[playlog][kafka_failed] device=%s err=%v",
+				deviceID, err,
+			)
+		} else {
+			log.Printf(
+				"[playlog][kafka_ok] device=%s",
+				deviceID,
+			)
+		}
+	}
+	// // 4️⃣ Redis Stream 投递
+	// data, _ := json.Marshal(logPayload)
+	// streamName := "play_log_stream"
+	// if h.Manager.rdb != nil {
+	// 	//id=<毫秒时间戳>-<同一毫秒内的序号>
+	// 	id, err := h.Manager.rdb.XAdd(ctx, &redis.XAddArgs{
+	// 		Stream: streamName,
+	// 		MaxLen: 10000, //最多保留10000条，防止内存爆炸
+	// 		Approx: true,  //近似剪裁，大概保留10000~10500条数据
+	// 		Values: map[string]interface{}{"data": string(data)},
+	// 	}).Result()
+	// 	if err != nil {
+	// 		log.Printf("[playlog][redis_failed] device=%s err=%v", deviceID, err)
+	// 	} else {
+	// 		log.Printf("[playlog][redis_ok] device=%s stream_id=%s", deviceID, id)
+	// 	}
+	// } else {
+	// 	log.Printf("[playlog][redis_missing] Redis 未连接")
+	// }
 }
 
 // Python / Postman 调用：请求设备截图
@@ -234,32 +332,47 @@ func (h *Handler) handleSnapshot(msg DeviceMessage) {
 		msg.TS,
 		msg.ReqID,
 	)
-
-	// 4. 尝试上传 OSS（即使失败也继续）
-	ossURL := ""
-	if h.bucket != nil {
+	var ossURL string
+	// 4. 上传 OSS
+	if h.bucket == nil {
+		// ❗这是配置 / 初始化问题，必须显式打出来
+		log.Printf(
+			"[snapshot][ERROR] OSS 未初始化 device=%s req=%s",
+			msg.DeviceID, msg.ReqID,
+		)
+		ossURL = "" // 明确失败
+	} else {
 		err = h.bucket.PutObject(
 			objectKey,
 			bytes.NewReader(imgBytes),
 			oss.ContentType("image/jpeg"),
 		)
+
 		if err != nil {
-			log.Printf("[snapshot] OSS 上传失败: %v", err)
-			// 上传失败时，使用 data URL 回传图片（避免占位图），保证前端可以直接显示
-			ossURL = "data:image/jpeg;base64," + payload.Data
+			// ❗上传失败，但不伪装成功
+			log.Printf(
+				"[snapshot][ERROR] OSS 上传失败 device=%s req=%s key=%s err=%v",
+				msg.DeviceID,
+				msg.ReqID,
+				objectKey,
+				err,
+			)
+			ossURL = ""
 		} else {
-			// 上传成功，拼真实 URL
+			//上传成功
 			ossURL = fmt.Sprintf(
 				"https://%s.%s/%s",
 				os.Getenv("OSS_BUCKET"),
 				os.Getenv("OSS_ENDPOINT"),
 				objectKey,
 			)
+			log.Printf(
+				"[snapshot] OSS 上传成功 device=%s req=%s url=%s",
+				msg.DeviceID,
+				msg.ReqID,
+				ossURL,
+			)
 		}
-	} else {
-		// 如果根本没初始化 OSS，直接用 data URL 回传图片内容，这样前端无需 OSS 也能展示截图
-		log.Printf("[snapshot] OSS 未初始化，使用 data URL 回传图片")
-		ossURL = "data:image/jpeg;base64," + payload.Data
 	}
 
 	log.Printf("[snapshot] 流程继续，准备回调 Python. URL: %s", ossURL)
@@ -290,4 +403,19 @@ func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(stats)
+}
+
+// 获取终端设备IP
+func getClientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		return strings.TrimSpace(strings.Split(xff, ",")[0])
+	}
+	if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
+		return xrip
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }

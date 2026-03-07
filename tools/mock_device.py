@@ -40,14 +40,14 @@ def simulate_elevator(device_id, token): # 增加 token 参数
             
             # 读取本地图片逻辑（保持不变）
             try:
-                with open(r"D:\adver_system\elevator-ad-platform\data\test_snapshot.jpg", "rb") as f:
+                with open(r"E:\repository\elevator-ad-platform\data\test_snapshot.jpg", "rb") as f:
                     img_bytes = f.read()
                 img_b64 = base64.b64encode(img_bytes).decode("utf-8")
             except FileNotFoundError:
                 img_b64 = "BASE64_MOCK_DATA" 
-                print(f"[{device_id}] 警告: 未找到 test_snapshot.jpg")
+                print(f"[{device_id}] 警告: 未找到pg")
 
-            # --- 关键点：构造回复消息 ---
+            # --- 关键点： test_snapshot.j构造回复消息 ---
             # 为了兼容你的 Go 后端 handler.go，必须使用 snapshot_response 且数据放在 payload 里
             snapshot_msg = {
                 "type": "snapshot_response", # 匹配 handler.go 第 118 行的 case
@@ -138,7 +138,15 @@ def simulate_elevator(device_id, token): # 增加 token 参数
                     if random.random() > 0.7:  # 模拟随机产生日志
                         log_data = {
                             "type": "log",
-                            "payload": f"Device {device_id} is playing Ad_Video_{random.randint(100, 999)}.mp4"
+                            "payload": {
+                                "log_id": "log_10002",
+                                "ad_id": "ad_999",
+                                "playback_info": {
+                                    "duration_ms": 15000,
+                                    "status_code": 0
+                                },
+                                "meta": {}
+                            }
                         }
                         ws.send(json.dumps(log_data))
                         print(f"[{device_id}] 已上报播放日志")

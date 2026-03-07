@@ -190,7 +190,7 @@
 **错误上报**
 
     void OnSystemInit()
-    重启后检查日志并上报到云
+    重启后检查日志并上报到云        
 
 ## 2. 通信层：高性能接入网关 (C++)
 目标：承载成千上万台电梯终端的并发连接，作为端与云的“路由器”。 协议：推荐自定义协议 over TCP 或 WebSocket（为了双向通信）。
@@ -206,7 +206,7 @@
 
 ### B. 消息路由 (Message Router)
     func DispatchMessage(msg []byte):
-    功能: 解析端侧发来的包。如果是“日志”，写入Kafka/数据库；如果是“截图”，上传OSS并回调Python；如果是“状态查询”，直接回复。
+    功能: 解析端侧发来的包。如果是“日志”，使用redis数据库(redis stream数据结构)//（写入Kafka/数据库）；如果是“截图”，上传OSS并回调Python；如果是“状态查询”，直接回复。
 
     func PushCommand(deviceID string, cmd Command):
     功能: 供Python后端调用（通过gRPC/HTTP接口）。查找该deviceID对应的内存中的Connection，将指令（如“更新播放列表”）通过长连接下发给C++端。

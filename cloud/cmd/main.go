@@ -29,7 +29,10 @@ func main() {
 	// ✅ 在程序启动时初始化 OSS
 	bucket := gateway.InitOSSBucket()
 
-	handler := gateway.NewHandler(mgr, bucket)
+	// // ⭐ 初始化 Kafka（新增）
+	kafkaProducer := gateway.InitKafkaProducer()
+
+	handler := gateway.NewHandler(mgr, bucket, kafkaProducer)
 
 	// --- 接口清单 ---
 	// 1. 南向接口：给电梯连接用的

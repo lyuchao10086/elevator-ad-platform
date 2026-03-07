@@ -154,7 +154,7 @@ JSON
 
 -  **GO网关回调**
   1)'/api/device/status' - GO网关通知python后端设备在线/掉线
-  2)'http://127.0.0.1:5000/api/v1/devices/remote/snapshot/callback' - GO网关通知python后端设备截图生成
+  2)'http://127.0.0.1:8000/api/v1/devices/remote/snapshot/callback' - GO网关通知python后端设备截图生成
 # 二、业务功能实现
 
 ## 1. 设备状态管理
