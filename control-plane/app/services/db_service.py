@@ -498,6 +498,41 @@ def list_campaign_publish_logs(campaign_id: str, limit: int = 100, offset: int =
         conn.close()
 
 
+def mark_campaign_retry_batch(campaign_id: str, source_batch_id: str) -> bool:
+    """
+    Mark a source publish batch as retried once.
+    Returns True if this is the first mark, False if already marked before.
+    """
+    if not source_batch_id:
+        return True
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS campaign_retry_batches (
+                id BIGSERIAL PRIMARY KEY,
+                campaign_id TEXT NOT NULL,
+                source_batch_id TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                UNIQUE (campaign_id, source_batch_id)
+            )
+            """
+        )
+        cur.execute(
+            """
+            INSERT INTO campaign_retry_batches (campaign_id, source_batch_id)
+            VALUES (%s, %s)
+            ON CONFLICT (campaign_id, source_batch_id) DO NOTHING
+            """,
+            [campaign_id, source_batch_id],
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
 def insert_campaign_version(campaign_id: str, version: str, schedule_json: dict) -> int:
     """
     Save a campaign version snapshot for history/rollback.

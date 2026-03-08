@@ -232,6 +232,11 @@ def test_retry_failed_returns_503_when_log_query_fails(client, monkeypatch):
 def test_retry_failed_returns_502_when_gateway_delivery_fails(client, monkeypatch):
     campaign_id = _create_campaign(client)
     monkeypatch.setattr(campaigns_ep.db_service, "get_latest_failed_campaign_devices", lambda *_args, **_kwargs: ["dev_001"])
+    monkeypatch.setattr(
+        campaigns_ep.db_service,
+        "mark_campaign_retry_batch",
+        lambda *_args, **_kwargs: True,
+    )
     monkeypatch.setattr(campaigns_ep.db_service, "get_existing_device_ids", lambda ids: ids)
     monkeypatch.setattr(campaigns_ep.db_service, "get_existing_material_ids", lambda ids: ids)
     monkeypatch.setattr(campaigns_ep.db_service, "insert_campaign_publish_logs", lambda **kwargs: len(kwargs["results"]))
@@ -247,6 +252,23 @@ def test_retry_failed_returns_502_when_gateway_delivery_fails(client, monkeypatc
     assert detail["message"] == "gateway retry delivery failed"
     assert detail["batch_id"].startswith("pub_")
     assert len(detail["results"]) == 1
+
+
+def test_retry_failed_is_idempotent_by_source_batch(client, monkeypatch):
+    campaign_id = _create_campaign(client)
+    monkeypatch.setattr(campaigns_ep.db_service, "get_latest_failed_campaign_devices", lambda *_args, **_kwargs: ["dev_001"])
+    monkeypatch.setattr(
+        campaigns_ep.db_service,
+        "mark_campaign_retry_batch",
+        lambda *_args, **_kwargs: False,
+    )
+
+    resp = client.post(f"/api/v1/campaigns/{campaign_id}/retry-failed")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["idempotent"] is True
+    assert body["retried"] == 0
+    assert body["message"] == "source batch already retried"
 
 
 def test_publish_is_idempotent_after_success(client, monkeypatch):
