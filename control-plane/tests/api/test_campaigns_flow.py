@@ -256,6 +256,16 @@ def test_retry_failed_returns_502_when_gateway_delivery_fails(client, monkeypatc
 
 def test_retry_failed_is_idempotent_by_source_batch(client, monkeypatch):
     campaign_id = _create_campaign(client)
+    monkeypatch.setattr(
+        campaigns_ep,
+        "_latest_batch_for_campaign",
+        lambda *_args, **_kwargs: {
+            "campaign_id": campaign_id,
+            "version": "20260308_v1",
+            "batch_id": "pub_src1",
+            "results": [{"device_id": "dev_001", "ok": False, "error": "timeout"}],
+        },
+    )
     monkeypatch.setattr(campaigns_ep.db_service, "get_latest_failed_campaign_devices", lambda *_args, **_kwargs: ["dev_001"])
     monkeypatch.setattr(
         campaigns_ep.db_service,
@@ -358,11 +368,12 @@ def test_campaign_full_chain_regression_flow(client, monkeypatch):
 
     retry_resp = client.post(f"/api/v1/campaigns/{campaign_id}/retry-failed")
     assert retry_resp.status_code == 200
-    assert retry_resp.json()["retried"] >= 1
+    assert retry_resp.json()["retried"] == 0
+    assert retry_resp.json()["message"] == "no failed devices to retry"
 
     retry_again_resp = client.post(f"/api/v1/campaigns/{campaign_id}/retry-failed")
     assert retry_again_resp.status_code == 200
-    assert retry_again_resp.json()["idempotent"] is True
+    assert retry_again_resp.json()["retried"] == 0
 
 
 def test_publish_is_idempotent_after_success(client, monkeypatch):
