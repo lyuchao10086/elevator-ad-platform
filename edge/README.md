@@ -1,257 +1,168 @@
-# Schedule Manager
+# Edge Computing Player
 
-该模块负责解析 JSON 格式的排期策略文件，将其持久化存储到本地 SQLite 数据库中，并提供对象的增删改查（CRUD）接口供上层应用调用、根据优先级计算下一个待播放文件以及使用算法清理过期媒体文件
+这是一个基于 C++17 开发的边缘计算广告播放器项目。它设计用于在终端设备（如电梯广告机、商场大屏）上运行，能够根据预设的排期策略自动播放视频广告，支持插播、定投、轮播等多种模式，并具备日志上报和远程控制功能。
 
-## 📂 项目结构
+## 目录
 
+- [项目简介](#项目简介)
+- [核心特性](#核心特性)
+- [环境依赖](#环境依赖)
+- [编译与运行](#编译与运行)
+- [模块设计](#模块设计)
+- [数据库设计](#数据库设计)
+- [接口说明](#接口说明)
+- [配置说明](#配置说明)
+
+## 项目简介
+
+本项目采用模块化设计，核心逻辑由 `EdgeManager` 统一调度，底层使用 `FFmpeg` 进行视频解码，`SDL2` 进行渲染，`SQLite3` 进行本地数据持久化，并使用 `cpp-httplib` 实现 WebSocket/HTTP 网络通信。
+
+## 核心特性
+
+*   **多模式播放**：支持时间段轮播、定点插播、紧急插播等多种播放策略。
+*   **离线运行**：所有排期和素材均本地存储，网络断开不影响播放。
+*   **本地持久化**：使用 SQLite 存储排期数据和播放日志，支持事务处理。
+*   **日志上报**：支持 WebSocket 实时上报播放日志，具备断网重连和本地缓存机制。
+*   **远程控制**：支持通过 WebSocket 网关接收远程指令（如更新排期、截屏等）。
+*   **自动维护**：具备磁盘空间监控和 LRU 清理机制。
+
+## 环境依赖
+
+*   **编译器**: 支持 C++17 的编译器 (GCC/Clang/MSVC)
+*   **构建工具**: CMake >= 3.10
+*   **第三方库**:
+    *   `ffmpeg` (libavcodec, libavformat, libswscale, libavutil)
+    *   `sdl2`
+    *   `sqlite3`
+    *   `nlohmann_json` (JSON 解析)
+    *   `cpp-httplib` (网络通信，需配合 OpenSSL)
+    *   `openssl` (可选，用于 HTTPS/WSS)
+
+## 编译与运行
+
+### 1. 编译项目
+
+```bash
+mkdir build
+cd build
+cmake ..
+make
 ```
-schedule/
-├── include/                # 头文件
-│   ├── models/             # 实体类定义 (Asset, Schedule, TimeSlot, Interrupt, PlayItem)
-│   ├── nlohmann/           # JSON 库
-│   ├── Database.hpp        # SQLite 封装类
-│   └── ScheduleManager.hpp # 核心管理类 
-├── src/                    # 源代码
-│   ├── models/             # 实体类实现
-│   ├── Database.cpp        # SQLite 操作实现
-│   ├── ScheduleManager.cpp # 业务逻辑与 DB 交互实现
-│   ├── test.cpp 						# 测试部分
-│   └── main.cpp            # 程序入口与测试代码
-├── resources/              # 资源文件 (测试用 JSON)
-├── CMakeLists.txt          # CMake 构建脚本
-├── README.md               # 项目文档
-└── schedule.mdj            # 项目类图
+
+### 2. 准备资源
+
+确保项目根目录下有 `resources` 目录，并包含以下结构：
+```
+resources/
+├── ads/                  # 存放视频素材文件
+├── edge.db               # SQLite 数据库 (自动生成)
+├── config.json           # 主配置文件
+├── ads.json              # 广告素材元数据
+└── schedule.json         # 排期策略文件
 ```
 
-## 💾 类设计
+### 3. 启动 Mock 网关 (可选)
 
-![image-20260210145439538](/Users/lyuchao/Library/Application Support/typora-user-images/image-20260210145439538.png)
+用于本地测试日志上报和心跳功能。
 
-系统使用 SQLite 存储数据，包含以下核心表：
+```bash
+python3 mock_gateway.py
+```
 
-**PlayItem**
+### 4. 运行播放器
 
-- 存储播放时的信息
+```bash
+./build/edge
+```
 
-  ![image-20260210183014739](/Users/lyuchao/Library/Application Support/typora-user-images/image-20260210183014739.png)
+## 模块设计
 
-**schedules**
+### 1. EdgeManager (核心控制器)
+- **职责**: 负责系统的生命周期管理，协调各个模块工作。
+- **关键方法**:
+    - `init()`: 初始化配置、数据库、网络和 SDL。
+    - `run()`: 主循环，负责计算下一个播放任务 (`getNextAsset`) 并调度播放。
+    - `syncAds()`, `syncSchedule()`: 同步本地 JSON 配置文件到数据库。
+    - `printInfo()`: 统一日志输出接口。
+    - `cleanupStorage()`: 磁盘空间清理。
 
-* 存储全局排期策略（策略ID, 生效日期, 下发参数等）。
+### 2. VideoPlayer (播放引擎)
+- **职责**: 封装 FFmpeg 和 SDL2，提供简单的播放接口。
+- **关键方法**:
+    - `Load(path)`: 加载视频文件，初始化解码器。
+    - `Play()`: 启动解码线程。
+    - `Update()`: 渲染当前帧 (需在主线程调用)。
+    - `Stop()`: 停止播放并释放资源。
 
-  ![image-20260210183047187](/Users/lyuchao/Library/Application Support/typora-user-images/image-20260210183047187.png)
+### 3. NetworkClient (网络客户端)
+- **职责**: 处理与云端的通信。
+- **关键方法**:
+    - `start(logProvider, ...)`: 启动日志上报线程。
+    - `startGatewayConnection(...)`: 启动网关长连接线程，发送心跳。
 
-**interrupts**
+### 4. Database (数据层)
+- **职责**: SQLite3 的 RAII 封装。
+- **关键方法**: `execute()`, `query()`, `beginTransaction()`, `commit()`, `rollback()`.
 
-* 关联到策略，定义插播广告规则（触发条件, 优先级, 播放模式）。
+## 数据库设计
 
-* 外键关联: `schedules(policy_id)` (级联删除)。
+系统启动时会自动创建 `resources/edge.db`，包含以下核心表：
 
-  ![image-20260210183117923](/Users/lyuchao/Library/Application Support/typora-user-images/image-20260210183117923.png)
+### 1. log (播放日志)
+记录每次播放的详细信息。
+| 字段 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| log_id | TEXT | UUID 主键 |
+| device_id | TEXT | 设备 ID |
+| ad_id | TEXT | 广告 ID |
+| start_time | TIMESTAMP | 开始播放时间 |
+| end_time | TIMESTAMP | 结束播放时间 |
+| duration_ms | INT | 播放时长 (毫秒) |
+| uploaded | INTEGER | 上报状态 (0:未上传, 1:已上传) |
 
-**time_slots**
+### 2. advertisement (素材库)
+| 字段 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| ad_id | TEXT | 广告 ID |
+| filename | TEXT | 文件名 |
+| last_played_time | INTEGER | 最后播放时间 (用于 LRU 清理) |
 
-* 关联到策略，定义分时段播放规则。
+### 3. schedule_timeslot (时段排期)
+| 字段 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| slot_id | INTEGER | 时段 ID |
+| time_range | TEXT | 时间范围 (e.g. "08:00:00-22:00:00") |
+| playlist | TEXT | 播放列表 JSON 数组 |
+| priority | INTEGER | 优先级 |
 
-* 包含 `playlist` 字段，以 JSON 字符串形式存储该时间段的素材 ID 列表。
+### 4. schedule_interrupt (插播策略)
+| 字段 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| trigger_type | TEXT | 触发类型 (e.g. "count", "time") |
+| status | INTEGER | 状态 (0:未播放, 1:已播放) |
 
-* 外键关联: `schedules(policy_id)` (级联删除)。
+## 接口说明
 
-  ![image-20260210183141249](/Users/lyuchao/Library/Application Support/typora-user-images/image-20260210183141249.png)
+### 内部接口调用关系
+1. **播放流程**: `EdgeManager::run()` -> `EdgeManager::getNextAsset()` -> `Database::query()` (查询 schedule 表) -> `VideoPlayer::Load()` -> `VideoPlayer::Play()`.
+2. **日志流程**: `EdgeManager::recordPlayEnd()` -> `Database::execute()` (写入 log 表) -> `NetworkClient` (后台线程读取 log 表并上报) -> `EdgeManager::updateLogStatus()` (更新 uploaded=1).
 
-**assets**
+### 网络接口 (WebSocket)
+- **心跳包**: `{"id": "DEVICE_001", "token": "..."}`
+- **日志包**: `{"id": "DEVICE_001", "token": "...", "logs": [...]}`
 
-* 存储媒体文件信息（ID, 类型, 文件名, MD5, 时长等）。
+## 配置说明
 
-  ![image-20260210183211038](/Users/lyuchao/Library/Application Support/typora-user-images/image-20260210183211038.png)
-
-## 🚀 核心功能接口
-
-##### JSON格式
-
+`config.json` 示例：
 ```json
 {
-  "assets": [
-    {
-      "id": "AD_NIKE_01",
-      "type": "video",
-      "filename": "nike_2026_q1.mp4",
-      "md5": "a1b2c3d4e5f6...",
-      "duration": 300,
-      "bytes": 20971520,
-      "last_played_time": 0
-    },
-    {
-      "id": "AD_COKE_CNY",
-      "type": "video",
-      "filename": "coke_cny_final.mp4",
-      "md5": "f9e8d7c6b5...",
-      "duration": 900,
-      "bytes": 10485760,
-      "last_played_time": 0
-    },
-    {
-      "id": "AD_公益_01",
-      "type": "image",
-      "filename": "public_welfare.jpg",
-      "md5": "f9e84d56b5...",
-      "duration": 10,
-      "bytes": 1048576,
-      "last_played_time": 0
-    },
-    {
-      "id": "AD_APP_PROMO",
-      "type": "video",
-      "filename": "ad_app_promo.mp4",
-      "md5": "f9e84d56b5...",
-      "duration": 600,
-      "bytes": 10485760,
-      "last_played_time": 0
-    },
-    {
-      "id": "AD_LOGO_01",
-      "type": "image",
-      "filename": "ad_logo_01.jpg",
-      "md5": "f9e84d56b5...",
-      "duration": 10,
-      "bytes": 2097152,
-      "last_played_time": 0
-    }
-  ]
+    "device_id": "ELEV_001",
+    "token": "auth_token_123",
+    "resources_dir": "resources/",
+    "db_path": "resources/edge.db",
+    "ads_config_path": "resources/ads.json",
+    "schedule_config_path": "resources/schedule.json",
+    "cloud_api_url": "ws://127.0.0.1:8080/",
+    "gateway_ws_url": "ws://127.0.0.1:8080/"
 }
 ```
-
-```json
-{
-  "policy_id": "POL_SH_20260112_V1",
-  "effective_date": "2026-01-12",
-  "download_base_url": "https://oss.cdn.com/ads/",
-  "default_volume": 60,
-  "download_retry_count": 3,
-  "report_interval_sec": 60,
-  "interrupts": {
-    "trigger_type": "command",
-    "ad_id": "AD_EMERGENCY_FIRE",
-    "priority": 9,
-    "play_mode": "loop_until_stop"
-  },
-  "time_slots": [
-    {
-      "slot_id": 1,
-      "time_range": "08:00:00-10:00:00",
-      "volume": 80,
-      "priority": 7,
-      "loop_mode": "sequence",
-      "playlist": [
-        "AD_NIKE_01",
-        "AD_COKE_CNY"
-      ]
-    },
-    {
-      "slot_id": 2,
-      "time_range": "17:00:00-19:00:00",
-      "volume": 50,
-      "priority": 7,
-      "loop_mode": "sequence",
-      "playlist": [
-        "AD_NIKE_01",
-        "AD_APP_PROMO"
-      ]
-    },
-    {
-      "slot_id": 3,
-      "time_range": "00:00:00-23:59:59",
-      "volume": 0,
-      "priority": 2,
-      "loop_mode": "random",
-      "playlist": [
-        "AD_公益_01",
-        "AD_LOGO_01"
-      ]
-    }
-  ]
-}
-```
-
-
-
-##### 对象公有的接口，例：Object对象
-
-```c++
-//无参构造
-Object();
-
-//有参数构造
-Object(ElemType1 param1, ElemType2 param2, ...);
-
-//从Json对象拷贝构造
-Object(const json& j);
-
-//Getter和Setter
-...
-
-//序列化为Json对象
-json toJson() const;
-
-//序列化为字符串
-string toString() const;
-
-// nlohmann/json 序列化/反序列化辅助函数
-void to_json(json& j, const Object& p);
-void from_json(const json& j, Object& p);
-```
-
-
-
-##### 数据库接口(Database.hpp)
-
-```C++
-//执行无返回结果的 SQL 语句，用于建表、增、删、改操作
-void execute(const string& sql);
-
-//执行有返回结果的 SQL 语句，用于查询操作
-vector<map<string, string>> query(const string& sql);
-```
-
-
-
-##### 管理模块接口(ScheduleManager.hpp)
-
-```C++
-//初始化数据库、建库、建表等操作
-void initSchema();
-
-//清除数据库中的所有内容
-void clearAll();
-
-//同步云端下发的Json播放清单，存入本地数据库
-void syncSchedule(const string& jsonStr);
-
-//参数为插播对象，若对象存在，则进行插播相关逻辑
-bool triggerInterrupt(const Interrupt& interrupt);
-
-//参数为插播对象，根据数据库中的内容以及插播对象，计算出下一个应该播放的媒体文件，并存入相应数据库
-optional<Asset> getNextAsset(const optional<Interrupt>& interrupt);
-
-//获取当前播放列表
-vector<PlayItem> getPlayQueue() const;
-
-//刷新播放列表
-void refreshPlayQueue();
-
-//使用LRU算法，清理占用超过限制的磁盘广告媒体文件
-void cleanStorage(long long maxBytes);
-
-//对广告资源的增删改查操作
-void insertAsset(const Asset& asset);
-optional<Asset> getAsset(const string& id);
-void updateAsset(const Asset& asset);
-void deleteAsset(const string& id);
-
-//对播放清单以及相关联的实体的增删改查操作
-void insertSchedule(const Schedule& schedule);
-optional<Schedule> getSchedule(const string& policyId);
-void updateSchedule(const Schedule& schedule);
-void deleteSchedule(const string& policyId);
-```
-
