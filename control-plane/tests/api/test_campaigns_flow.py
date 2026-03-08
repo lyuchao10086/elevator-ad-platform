@@ -232,6 +232,11 @@ def test_retry_failed_returns_503_when_log_query_fails(client, monkeypatch):
 def test_retry_failed_returns_502_when_gateway_delivery_fails(client, monkeypatch):
     campaign_id = _create_campaign(client)
     monkeypatch.setattr(campaigns_ep.db_service, "get_latest_failed_campaign_devices", lambda *_args, **_kwargs: ["dev_001"])
+    monkeypatch.setattr(
+        campaigns_ep.db_service,
+        "mark_campaign_retry_batch",
+        lambda *_args, **_kwargs: True,
+    )
     monkeypatch.setattr(campaigns_ep.db_service, "get_existing_device_ids", lambda ids: ids)
     monkeypatch.setattr(campaigns_ep.db_service, "get_existing_material_ids", lambda ids: ids)
     monkeypatch.setattr(campaigns_ep.db_service, "insert_campaign_publish_logs", lambda **kwargs: len(kwargs["results"]))
@@ -247,6 +252,128 @@ def test_retry_failed_returns_502_when_gateway_delivery_fails(client, monkeypatc
     assert detail["message"] == "gateway retry delivery failed"
     assert detail["batch_id"].startswith("pub_")
     assert len(detail["results"]) == 1
+
+
+def test_retry_failed_is_idempotent_by_source_batch(client, monkeypatch):
+    campaign_id = _create_campaign(client)
+    monkeypatch.setattr(
+        campaigns_ep,
+        "_latest_batch_for_campaign",
+        lambda *_args, **_kwargs: {
+            "campaign_id": campaign_id,
+            "version": "20260308_v1",
+            "batch_id": "pub_src1",
+            "results": [{"device_id": "dev_001", "ok": False, "error": "timeout"}],
+        },
+    )
+    monkeypatch.setattr(campaigns_ep.db_service, "get_latest_failed_campaign_devices", lambda *_args, **_kwargs: ["dev_001"])
+    monkeypatch.setattr(
+        campaigns_ep.db_service,
+        "mark_campaign_retry_batch",
+        lambda *_args, **_kwargs: False,
+    )
+
+    resp = client.post(f"/api/v1/campaigns/{campaign_id}/retry-failed")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["idempotent"] is True
+    assert body["retried"] == 0
+    assert body["message"] == "source batch already retried"
+
+
+def test_campaign_full_chain_regression_flow(client, monkeypatch):
+    logs = []
+    batch_retried = set()
+
+    def _insert_logs(**kwargs):
+        batch_id = kwargs["batch_id"]
+        campaign_id = kwargs["campaign_id"]
+        version = kwargs["version"]
+        for r in kwargs["results"]:
+            logs.append(
+                {
+                    "campaign_id": campaign_id,
+                    "batch_id": batch_id,
+                    "version": version,
+                    "device_id": r.get("device_id"),
+                    "ok": bool(r.get("ok")),
+                    "error": r.get("error"),
+                    "created_at": "2026-03-08T00:00:00Z",
+                }
+            )
+        return len(kwargs["results"])
+
+    def _list_logs(campaign_id, limit=100, offset=0):
+        rows = [r for r in logs if r["campaign_id"] == campaign_id]
+        rows = list(reversed(rows))
+        return rows[offset:offset + limit]
+
+    def _failed_devices(campaign_id):
+        if not logs:
+            return []
+        latest_batch = logs[-1]["batch_id"]
+        return [r["device_id"] for r in logs if r["campaign_id"] == campaign_id and r["batch_id"] == latest_batch and r["ok"] is False]
+
+    def _mark_retry(campaign_id, source_batch_id):
+        key = (campaign_id, source_batch_id)
+        if key in batch_retried:
+            return False
+        batch_retried.add(key)
+        return True
+
+    call_count = {"n": 0}
+
+    def _send_remote_command(device_id, *_args, **_kwargs):
+        call_count["n"] += 1
+        # first publish: dev_002 fails once to produce retry target
+        if call_count["n"] == 2 and device_id == "dev_002":
+            raise RuntimeError("mock gateway timeout")
+
+    monkeypatch.setattr(campaigns_ep.db_service, "update_campaign_status", lambda *_args, **_kwargs: 1)
+    monkeypatch.setattr(campaigns_ep.db_service, "get_existing_device_ids", lambda ids: ids)
+    monkeypatch.setattr(campaigns_ep.db_service, "get_existing_material_ids", lambda ids: ids)
+    monkeypatch.setattr(campaigns_ep.db_service, "insert_campaign_publish_logs", _insert_logs)
+    monkeypatch.setattr(campaigns_ep.db_service, "list_campaign_publish_logs", _list_logs)
+    monkeypatch.setattr(campaigns_ep.db_service, "get_latest_failed_campaign_devices", _failed_devices)
+    monkeypatch.setattr(campaigns_ep.db_service, "mark_campaign_retry_batch", _mark_retry)
+    monkeypatch.setattr(campaigns_ep, "send_remote_command", _send_remote_command)
+
+    create_resp = client.post("/api/v1/campaigns/strategy", json=_strategy_payload_with_interrupts())
+    assert create_resp.status_code == 200
+    campaign_id = create_resp.json()["campaign_id"]
+
+    edge_resp = client.get(f"/api/v1/campaigns/{campaign_id}/edge-schedule")
+    assert edge_resp.status_code == 200
+    assert edge_resp.json()["time_slots"][-1]["slot_id"] == 99
+
+    pub_resp = client.post(f"/api/v1/campaigns/{campaign_id}/publish")
+    assert pub_resp.status_code == 200
+    assert pub_resp.json()["pushed"] == 1
+    assert pub_resp.json()["total"] == 2
+
+    log_resp = client.get(f"/api/v1/campaigns/{campaign_id}/publish-logs")
+    assert log_resp.status_code == 200
+    assert log_resp.json()["failed"] >= 1
+
+    versions_resp = client.get(f"/api/v1/campaigns/{campaign_id}/versions")
+    assert versions_resp.status_code == 200
+    version = versions_resp.json()["items"][0]["version"]
+
+    rollback_resp = client.post(
+        f"/api/v1/campaigns/{campaign_id}/rollback",
+        json={"version": version, "publish_now": True},
+    )
+    assert rollback_resp.status_code == 200
+    assert rollback_resp.json()["published"] is True
+
+    retry_resp = client.post(f"/api/v1/campaigns/{campaign_id}/retry-failed")
+    assert retry_resp.status_code == 200
+    assert retry_resp.json()["retried"] == 0
+    assert retry_resp.json()["message"] == "no failed devices to retry"
+
+    retry_again_resp = client.post(f"/api/v1/campaigns/{campaign_id}/retry-failed")
+    assert retry_again_resp.status_code == 200
+    assert retry_again_resp.json()["retried"] == 0
 
 
 def test_publish_is_idempotent_after_success(client, monkeypatch):
