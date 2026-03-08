@@ -521,6 +521,7 @@ def list_campaigns(limit=100, offset=0):
     conn = get_conn()
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
+        ensure_campaign_tables(cur)
         sql = "SELECT * FROM campaigns ORDER BY campaign_id LIMIT %s OFFSET %s"
         params = [limit, offset]
         cur.execute(sql, params)
@@ -534,6 +535,7 @@ def get_campaign(campaign_id: str):
     conn = get_conn()
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
+        ensure_campaign_tables(cur)
         sql = "SELECT * FROM campaigns WHERE campaign_id = %s"
         cur.execute(sql, [campaign_id])
         row = cur.fetchone()
@@ -546,6 +548,7 @@ def update_campaign_status(campaign_id: str, status: str):
     conn = get_conn()
     try:
         cur = conn.cursor()
+        ensure_campaign_tables(cur)
         sql = "UPDATE campaigns SET status = %s, updated_at = now() WHERE campaign_id = %s"
         cur.execute(sql, [status, campaign_id])
         conn.commit()
@@ -561,6 +564,7 @@ def insert_campaign(meta: dict):
     conn = get_conn()
     try:
         cur = conn.cursor()
+        ensure_campaign_tables(cur)
         cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'campaigns'")
         cols = {r[0] for r in cur.fetchall()}
 
@@ -897,6 +901,32 @@ def get_latest_failed_campaign_devices(campaign_id: str) -> list:
         return [r[0] for r in cur.fetchall()]
     finally:
         conn.close()
+
+
+def ensure_campaign_tables(cur) -> None:
+    """
+    Create campaign-related base tables/indexes if they do not exist.
+    This keeps local/dev environments bootstrappable without manual SQL steps.
+    """
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS campaigns (
+            campaign_id TEXT PRIMARY KEY,
+            name TEXT,
+            creator_id TEXT,
+            status TEXT NOT NULL DEFAULT 'draft',
+            schedule_json JSONB NOT NULL,
+            target_device_groups JSONB,
+            start_at TIMESTAMPTZ,
+            end_at TIMESTAMPTZ,
+            version TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """
+    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_campaigns_updated_at ON campaigns(updated_at DESC)")
 
 
 def list_campaign_publish_logs(campaign_id: str, limit: int = 100, offset: int = 0) -> list:

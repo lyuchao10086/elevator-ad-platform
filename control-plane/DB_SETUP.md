@@ -46,3 +46,22 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 或者手动运行 `init_materials.sql` 中的内容以创建 `materials` 表。上传接口将同时写入本地索引文件（`control-plane/data/materials/index.json`），当 Postgres 可用时，后端也会尝试从数据库读取素材列表。
 
 如果你的 Postgres 使用非默认端口、用户名或密码，请相应调整上述变量。
+
+---
+
+## Campaign 表初始化（新增）
+
+如果你要启用广告策略的数据库持久化，请执行：
+
+```sql
+\i path/to/elevator-ad-platform/control-plane/db/init_campaigns.sql
+```
+
+说明：
+
+- `campaigns`：策略主表
+- `campaign_versions`：版本历史表
+- `campaign_publish_logs`：发布结果日志表
+
+同时，后端在运行时也会对 `campaigns` 表做基础兜底建表（本地开发友好），
+但推荐仍使用 `init_campaigns.sql` 统一初始化，避免环境差异。
