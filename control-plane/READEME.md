@@ -107,6 +107,7 @@ python -m pytest -c pytest.ini tests/api/test_campaigns_flow.py
 - publish / rollback 幂等行为
 - 端侧导出结构校验（`edge-schedule`）
 - 中断策略（interrupts）透传校验
+- `retry-failed` 按 `source_batch_id` 幂等校验
 
 ---
 
@@ -174,14 +175,15 @@ python -m pytest -c pytest.ini tests/api/test_campaigns_flow.py
   - `POST /campaigns/{id}/retry-failed`
 - 发布前校验增强（素材、设备、时段、优先级、重复项）
 - 错误语义标准化（400/404/502/503）
-- 幂等一致性增强（publish/rollback 二次调用不重复下发）
+- 幂等一致性增强（publish/rollback 重复下发防重、retry-failed 按批次幂等）
 - 端侧协议增强：`global_config`、`interrupts`、`time_slots` 及默认兜底 `slot_id=99`
+- 策略数据落库设计与脚本：`campaigns / campaign_versions / campaign_publish_logs`
+- 全链路回归通过（`tests/api/test_campaigns_flow.py`：`16 passed`）
 
 待完成（下一步）：
 
-- `retry-failed` 的更细粒度幂等约束（按批次重试行为再收敛）
 - 端到端联调脚本再沉淀（gateway + redis + db）
-- 最终交付文档整理（运行手册、故障排查、已知限制）
+- 最终 PR 合并与演示材料封板（汇报页、演示录屏、答辩问答）
 
 ---
 
