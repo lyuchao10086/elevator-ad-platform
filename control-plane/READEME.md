@@ -189,5 +189,6 @@ python -m pytest -c pytest.ini tests/api/test_campaigns_flow.py
 
 - 联调验收清单：`control-plane/docs/CAMPAIGN_E2E_CHECKLIST.md`
 - 前端对接说明：`control-plane/docs/CAMPAIGN_API_FRONTEND_CONTRACT.md`
+- 数据库与页面设计：`control-plane/docs/CAMPAIGN_DB_UI_SPEC.md`
 - 数据库配置：`control-plane/DB_SETUP.md`
 - 依赖定义：`control-plane/pyproject.toml`
