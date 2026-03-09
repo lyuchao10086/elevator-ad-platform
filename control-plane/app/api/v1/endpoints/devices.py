@@ -12,11 +12,24 @@ _DEVICE_STORE = {}
 
 # 连接 Redis (配置使用 settings)
 rdb = redis.Redis(
-    host=getattr(settings, 'redis_host', 'localhost'),
+    host=getattr(settings, 'redis_host', '10.12.58.42'), #服务器的ip地址
     port=getattr(settings, 'redis_port', 6379),
     db=getattr(settings, 'redis_db', 0),
+    password='123456',
     decode_responses=True,
 )
+
+# 在 devices.py 中 rdb 初始化之后，list_devices 函数之前
+print(f"DEBUG: 正在连接的 Redis 地址: {rdb.connection_pool.connection_kwargs.get('host')}")
+print(f"DEBUG: 正在连接的 Redis 数据库编号 (DB): {rdb.connection_pool.connection_kwargs.get('db')}")
+
+# 执行一次全库扫描，看看 Python 到底能看到什么 key
+try:
+    all_keys = rdb.keys("*")
+    print(f"DEBUG: Python 在当前数据库中看到的全部 Key 数量: {len(all_keys)}")
+    print(f"DEBUG: Python 看到的头 5 个 Key: {all_keys[:5]}")
+except Exception as e:
+    print(f"DEBUG: 扫描全库出错: {e}")
 
 @router.post("/register", response_model=DeviceRegisterResponse)
 def register_device(payload: DeviceRegisterRequest):

@@ -7,10 +7,10 @@ class Settings(BaseSettings):
     gateway_url: str = os.getenv("GATEWAY_URL", "http://127.0.0.1:8080")
 
     # Redis configuration
-    redis_host: str = os.getenv("REDIS_HOST", "127.0.0.1")
+    redis_host: str = os.getenv("REDIS_HOST", "10.12.58.42")
     redis_port: int = int(os.getenv("REDIS_PORT", "6379"))
     redis_db: int = int(os.getenv("REDIS_DB", "0"))
-    redis_password: str = os.getenv("REDIS_PASSWORD", "")
+    redis_password: str = os.getenv("REDIS_PASSWORD", "123456")
 
     # Postgres configuration
     pg_host: str = "localhost"
