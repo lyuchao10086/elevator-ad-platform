@@ -54,28 +54,46 @@ type SnapshotPayload struct {
 	Data       string `json:"data"`       // Base64 图片数据
 }
 type PlayLogPayload struct {
-	LogID string `json:"log_id"`
-	AdID  string `json:"ad_id"`
+	LogID      string `json:"log_id"`
+	DeviceID   string `json:"device_id"`
+	AdID       string `json:"ad_id"`
+	AdFileName string `json:"ad_file_name"`
 
-	PlaybackInfo struct {
-		StartTime  string `json:"start_time"`
-		EndTime    string `json:"end_time"`
-		DurationMs int64  `json:"duration_ms"`
-		StatusCode int    `json:"status_code"`
-		StatusMsg  string `json:"status_msg"`
-	} `json:"playback_info"`
+	StartTime  string `json:"start_time"`
+	EndTime    string `json:"end_time"`
+	DurationMs int64  `json:"duration_ms"`
 
-	SecurityCheck struct {
-		ExpectedMD5 string `json:"expected_md5"`
-		ActualMD5   string `json:"actual_md5"`
-	} `json:"security_check"`
+	StatusCode int    `json:"status_code"`
+	StatusMsg  string `json:"status_msg"`
 
-	Meta struct {
-		FirmwareVersion string `json:"firmware_version"`
-		ClientIP        string `json:"client_ip"`  // 终端可不传，网关兜底
-		CreatedAt       int64  `json:"created_at"` // 网关填写
-	} `json:"meta"`
+	CreatedAt       int64  `json:"created_at"`
+	DeviceIP        string `json:"device_ip"`
+	FirmwareVersion string `json:"firmware_version"`
 }
+
+// type PlayLogPayload struct {
+// 	LogID string `json:"log_id"`
+// 	AdID  string `json:"ad_id"`
+
+// 	PlaybackInfo struct {
+// 		StartTime  string `json:"start_time"`
+// 		EndTime    string `json:"end_time"`
+// 		DurationMs int64  `json:"duration_ms"`
+// 		StatusCode int    `json:"status_code"`
+// 		StatusMsg  string `json:"status_msg"`
+// 	} `json:"playback_info"`
+
+// 	SecurityCheck struct {
+// 		ExpectedMD5 string `json:"expected_md5"`
+// 		ActualMD5   string `json:"actual_md5"`
+// 	} `json:"security_check"`
+
+// 	Meta struct {
+// 		FirmwareVersion string `json:"firmware_version"`
+// 		ClientIP        string `json:"client_ip"`  // 终端可不传，网关兜底
+// 		CreatedAt       int64  `json:"created_at"` // 网关填写
+// 	} `json:"meta"`
+// }
 
 // 2. 面向电梯端的 WebSocket 接口
 // 对应文档：func HandleHandshake(conn Connection)
@@ -215,8 +233,8 @@ func (h *Handler) handleLogReport(deviceID string, payload json.RawMessage) {
 	}
 
 	// 2️⃣ 网关补充字段(时间、IP)
-	logPayload.Meta.CreatedAt = time.Now().Unix()
-	logPayload.Meta.ClientIP = h.Manager.GetDeviceIP(deviceID)
+	logPayload.CreatedAt = time.Now().Unix()
+	logPayload.DeviceIP = h.Manager.GetDeviceIP(deviceID)
 
 	// 3️⃣ 运维日志（人能看懂）
 	log.Printf(
@@ -224,20 +242,9 @@ func (h *Handler) handleLogReport(deviceID string, payload json.RawMessage) {
 		deviceID,
 		logPayload.LogID,
 		logPayload.AdID,
-		logPayload.PlaybackInfo.DurationMs,
-		logPayload.PlaybackInfo.StatusCode,
+		logPayload.DurationMs,
+		logPayload.StatusCode,
 	)
-
-	// // 4️⃣ Kafka 投递
-	// if h.kafka != nil {
-	// 	data, _ := json.Marshal(logPayload)
-	// 	if err := h.kafka.Send(deviceID, data); err != nil {
-	// 		log.Printf(
-	// 			"[playlog][kafka_failed] device=%s err=%v",
-	// 			deviceID, err,
-	// 		)
-	// 	}
-	// }
 	// 4️⃣ Kafka 投递
 	if h.kafka != nil {
 
