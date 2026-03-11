@@ -153,7 +153,7 @@ func (h *Handler) DispatchMessage(deviceID string, conn *websocket.Conn) {
 
 		case "log":
 			// 处理播放日志上报
-			h.handleLogReport(deviceID, msg.Payload)
+			h.handleLogReport(msg.Payload)
 
 		case "snapshot_response":
 			// 处理截图上传逻辑
@@ -220,72 +220,71 @@ func (h *Handler) HandleCommand(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleLogReport 处理电梯端上报的播放日志
-func (h *Handler) handleLogReport(deviceID string, payload json.RawMessage) {
-	var logPayload PlayLogPayload
+func (h *Handler) handleLogReport(conn *websocket.Conn, payload json.RawMessage) {
+	var logs []PlayLogPayload
 
 	// 1️⃣ 尝试解析播放日志
-	if err := json.Unmarshal(payload, &logPayload); err != nil {
+	if err := json.Unmarshal(payload, &logs); err != nil {
 		log.Printf(
-			"[playlog][invalid] device=%s err=%v raw=%s",
-			deviceID, err, string(payload),
+			"[playlog][invalid] err=%v raw=%s",
+			err, string(payload),
 		)
+		// 可以给侧端返回解析失败
+		conn.WriteJSON(map[string]interface{}{
+			"type":    "log_ack",
+			"success": false,
+			"message": "invalid payload",
+		})
 		return
 	}
+	for i := range logs {
+		//获得日志设备ID
+		deviceID := logs[i].DeviceID
+		// 2️⃣ 网关补充字段(时间、IP)
+		logs[i].CreatedAt = time.Now().Unix()
+		logs[i].DeviceIP = h.Manager.GetDeviceIP(deviceID)
 
-	// 2️⃣ 网关补充字段(时间、IP)
-	logPayload.CreatedAt = time.Now().Unix()
-	logPayload.DeviceIP = h.Manager.GetDeviceIP(deviceID)
+		// 3️⃣ 运维日志（人能看懂）
+		log.Printf(
+			"[playlog] device=%s log_id=%s ad_id=%s duration=%d status=%d",
+			deviceID,
+			logs[i].LogID,
+			logs[i].AdID,
+			logs[i].DurationMs,
+			logs[i].StatusCode,
+		)
+		// 4️⃣ Kafka 投递
+		if h.kafka != nil {
 
-	// 3️⃣ 运维日志（人能看懂）
-	log.Printf(
-		"[playlog] device=%s log_id=%s ad_id=%s duration=%d status=%d",
-		deviceID,
-		logPayload.LogID,
-		logPayload.AdID,
-		logPayload.DurationMs,
-		logPayload.StatusCode,
-	)
-	// 4️⃣ Kafka 投递
-	if h.kafka != nil {
+			data, err := json.Marshal(logs[i])
+			if err != nil {
+				log.Printf("[playlog][marshal_failed] %v", err)
+				return
+			}
 
-		data, err := json.Marshal(logPayload)
-		if err != nil {
-			log.Printf("[playlog][marshal_failed] %v", err)
-			return
-		}
-
-		err = h.kafka.Send(deviceID, data)
-		if err != nil {
-			log.Printf(
-				"[playlog][kafka_failed] device=%s err=%v",
-				deviceID, err,
-			)
-		} else {
-			log.Printf(
-				"[playlog][kafka_ok] device=%s",
-				deviceID,
-			)
+			err = h.kafka.Send(deviceID, data)
+			if err != nil {
+				log.Printf(
+					"[playlog][kafka_failed] device=%s err=%v",
+					deviceID, err,
+				)
+			} else {
+				log.Printf(
+					"[playlog][kafka_ok] device=%s log_id=%s",
+					deviceID,
+					logs[i].LogID,
+				)
+			}
 		}
 	}
-	// // 4️⃣ Redis Stream 投递
-	// data, _ := json.Marshal(logPayload)
-	// streamName := "play_log_stream"
-	// if h.Manager.rdb != nil {
-	// 	//id=<毫秒时间戳>-<同一毫秒内的序号>
-	// 	id, err := h.Manager.rdb.XAdd(ctx, &redis.XAddArgs{
-	// 		Stream: streamName,
-	// 		MaxLen: 10000, //最多保留10000条，防止内存爆炸
-	// 		Approx: true,  //近似剪裁，大概保留10000~10500条数据
-	// 		Values: map[string]interface{}{"data": string(data)},
-	// 	}).Result()
-	// 	if err != nil {
-	// 		log.Printf("[playlog][redis_failed] device=%s err=%v", deviceID, err)
-	// 	} else {
-	// 		log.Printf("[playlog][redis_ok] device=%s stream_id=%s", deviceID, id)
-	// 	}
-	// } else {
-	// 	log.Printf("[playlog][redis_missing] Redis 未连接")
-	// }
+	// ✅ 发送 ACK 给电梯端
+	conn.WriteJSON(map[string]interface{}{
+		"type":    "log_ack",
+		"success": true,
+		"count":   len(logs),
+		"message": "logs received",
+		"ts":      time.Now().Unix(),
+	})
 }
 
 // Python / Postman 调用：请求设备截图

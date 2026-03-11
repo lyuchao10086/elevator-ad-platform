@@ -4,10 +4,46 @@ import time
 import threading
 import random
 import base64
+import uuid
 
 # 配置信息
 GATEWAY_URL = "ws://127.0.0.1:8080/ws"
+logs = [
+    {
+        "log_id": str(uuid.uuid4()),
+        "device_id": "ELEV_002",
+        "ad_id": "AD_公益_01",
+        "ad_file_name": "resources/ads/public_welfare.jpg",
 
+        "start_time": "2026-03-09 10:53:20",
+        "end_time": "2026-03-09 10:53:30",
+        "duration_ms": 10000,
+
+        "status_code": 200,
+        "status_msg": "Play Success",
+
+        "created_at": int(time.time()),
+        "device_ip": "192.168.31.69",
+        "firmware_version": "1.0.0"
+    },
+    {
+        "log_id": str(uuid.uuid4()),
+        "device_id": "ELEV_003",
+        "ad_id": "AD_LOGO_01",
+        "ad_file_name": "resources/ads/ad_logo_01.jpg",
+
+        "start_time": "2026-03-09 10:53:30",
+        "end_time": "2026-03-09 10:53:40",
+        "duration_ms": 10000,
+
+        "status_code": 200,
+        "status_msg": "Play Success",
+
+        "created_at": int(time.time()),
+        "device_ip": "192.168.31.69",
+        "firmware_version": "1.0.0"
+    }
+]
 def simulate_elevator(device_id, token): # 增加 token 参数
     """模拟单台电梯终端的逻辑"""
     
@@ -90,15 +126,7 @@ def simulate_elevator(device_id, token): # 增加 token 参数
                     if random.random() > 0.7:  # 模拟随机产生日志
                         log_data = {
                             "type": "log",
-                            "payload": {
-                                "log_id": "log_10002",
-                                "ad_id": "ad_999",
-                                "playback_info": {
-                                    "duration_ms": 15000,
-                                    "status_code": 0
-                                },
-                                "meta": {}
-                            }
+                            "payload": logs,
                         }
                         ws.send(json.dumps(log_data))
                         print(f"[{device_id}] 已上报播放日志")
