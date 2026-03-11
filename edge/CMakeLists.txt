@@ -1,36 +1,60 @@
 cmake_minimum_required(VERSION 3.10)
-project(ScheduleModule)
+project(edge)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Find SQLite3
-find_package(SQLite3 REQUIRED)
-include_directories(${SQLite3_INCLUDE_DIRS})
-
+# 设置包含目录
 include_directories(include)
 
-# Add source files
-file(GLOB SOURCES "src/*.cpp" "src/models/*.cpp")
+# 查找 SQLite3 库
+find_package(SQLite3 REQUIRED)
 
-# Create executable (exclude test.cpp)
-add_executable(schedule_app src/main.cpp src/Database.cpp src/ScheduleManager.cpp src/models/Asset.cpp src/models/Schedule.cpp src/models/Interrupt.cpp src/models/TimeSlot.cpp src/models/PlayItem.cpp)
-target_compile_features(schedule_app PUBLIC cxx_std_17)
+# 查找 nlohmann_json 库 (如果是系统安装的)
+# 如果是 header-only 且在 include 目录下，则不需要 find_package，直接 include_directories 即可
+# 这里假设 nlohmann/json.hpp 已经在 include/nlohmann/json.hpp
 
-# Link SQLite3
-target_link_libraries(schedule_app PRIVATE SQLite::SQLite3)
+# 查找 FFmpeg 库
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(FFMPEG REQUIRED libavformat libavcodec libavutil libswscale)
 
-# Add test executable
-add_executable(schedule_test src/test.cpp src/Database.cpp src/ScheduleManager.cpp src/models/Asset.cpp src/models/Schedule.cpp src/models/Interrupt.cpp src/models/TimeSlot.cpp src/models/PlayItem.cpp)
-target_compile_features(schedule_test PUBLIC cxx_std_17)
-target_link_libraries(schedule_test PRIVATE SQLite::SQLite3)
+# 查找 SDL2 库
+find_package(SDL2 REQUIRED)
 
-# Copy resources directory to build directory
-add_custom_command(TARGET schedule_app POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_SOURCE_DIR}/resources
-    ${CMAKE_BINARY_DIR}/resources
-    COMMENT "Copying resources directory to build directory"
+# 添加可执行文件
+add_executable(edge 
+    src/Database.cpp 
+    src/main.cpp 
+    src/EdgeManager.cpp 
+    src/VideoPlayer.cpp
+    src/NetworkClient.cpp
 )
 
+# 包含头文件路径
+target_include_directories(edge PRIVATE 
+    include 
+    ${FFMPEG_INCLUDE_DIRS} 
+    ${SDL2_INCLUDE_DIRS}
+    /opt/homebrew/include
+    /opt/homebrew/Cellar/ffmpeg/7.1.1_2/include
+)
+
+# 链接目录
+link_directories(
+    ${FFMPEG_LIBRARY_DIRS} 
+    ${SDL2_LIBRARY_DIRS}
+    /opt/homebrew/lib
+    /opt/homebrew/Cellar/ffmpeg/7.1.1_2/lib
+    /usr/local/lib
+    /opt/homebrew/Cellar/sdl2/2.32.6/lib
+    /opt/homebrew/opt/ffmpeg/lib
+    /opt/homebrew/lib/
+)
+
+# 链接库
+target_link_libraries(edge 
+    sqlite3 
+    ${FFMPEG_LIBRARIES} 
+    ${SDL2_LIBRARIES}
+    "-L/opt/homebrew/lib -lavformat -lavcodec -lavutil -lswscale"
+)

@@ -1,7 +1,7 @@
 {
 	"InstallScripts" : 
 	[
-		"/Users/lyuchao/Documents/trae_projects/schedule/build/cmake_install.cmake"
+		"/Users/lyuchao/Documents/trae_projects/edge/build/cmake_install.cmake"
 	],
 	"Parallel" : false
 }

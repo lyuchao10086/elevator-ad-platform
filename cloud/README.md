@@ -21,6 +21,7 @@ go mod init elevator_project
 ## 2. 安装 Redis 驱动
 go get github.com/redis/go-redis/v9
 
+
 ## 3. 安装 WebSocket 驱动
 go get github.com/gorilla/websocket
 
@@ -28,48 +29,12 @@ go get github.com/gorilla/websocket
 go mod tidy
 
 ## 5. 测试
-* 启动redis-server.exe
+* 启动服务器环境cd kafka，执行docker-compose up -d
 * 运行main.go
 * 运行python mock_device.py
-
-
 * 在control-plane下运行python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
-### 开始“三步走”联调测试
-1. 模拟注册（领钥匙）
-打开 Postman，点击 New Request：
 
-方法：选择 POST
-
-地址：http://127.0.0.1:8000/api/v1/devices/register
-
-Body：选择 raw，右侧选 JSON，填入：
-
-JSON
-```solidity
-{"location": "上海中心01号"}
-```
-点击 Send：你会得到一个 device_id（比如 dev_12345）和一个 token。记下它们。
-
-2. 模拟电梯上线（进门）
-我们需要让电梯连上 Go 网关。
-
-修改你之前写的 Python 模拟脚本 mock_device.py（或者用任何 WebSocket 测试工具）。
-
-把里面的连接地址改为： ws://127.0.0.1:8080/ws?device_id=刚才拿到的ID&token=刚才拿到的Token
-
-运行这个脚本。
-
-看 Go 控制台：如果出现 [Manager] Device Registered: dev_12345，恭喜你，第一座桥修通了！
-
-3. 远程截图测试（发令）
-在云端让电梯拍照并传回来。 在 Postman 新开一个请求：
-
-方法：选择 GET
-
-地址：http://127.0.0.1:8000/api/v1/devices/remote/刚才拿到的ID/snapshot
-
-点击 Send。
 
 ## 6. 进度
 
@@ -87,7 +52,7 @@ JSON
 * **`func KeepAliveManager()`：【部分完成】**
 * **已实现**：在 `DispatchMessage` 的 `switch` 逻辑中，处理了 `type: "heartbeat"` 的消息并返回 `pong`，实现了基础的心跳响应。
 * **待完善**：目前还缺少“超时判定”逻辑。即如果设备 30 秒没发心跳，系统还不会自动将其踢下线并通知 Python 端。
-
+* 在服务器上部署redis并连接项目
 ---
 
 #### **B. 消息路由 (Message Router)**
@@ -154,7 +119,7 @@ JSON
 
 -  **GO网关回调**
   1)'/api/device/status' - GO网关通知python后端设备在线/掉线
-  2)'http://127.0.0.1:8000/api/v1/devices/remote/snapshot/callback' - GO网关通知python后端设备截图生成
+  2)'http://127.0.0.1:5000/api/v1/devices/remote/snapshot/callback' - GO网关通知python后端设备截图生成
 # 二、业务功能实现
 
 ## 1. 设备状态管理

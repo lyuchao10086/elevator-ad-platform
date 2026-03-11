@@ -7,10 +7,12 @@ set(CMAKE_DEPENDS_GENERATOR "Unix Makefiles")
 # The top level Makefile was generated from the following files:
 set(CMAKE_MAKEFILE_DEPENDS
   "CMakeCache.txt"
-  "/Users/lyuchao/Documents/trae_projects/schedule/CMakeLists.txt"
+  "/Users/lyuchao/Documents/trae_projects/edge/CMakeLists.txt"
   "CMakeFiles/4.0.2/CMakeCCompiler.cmake"
   "CMakeFiles/4.0.2/CMakeCXXCompiler.cmake"
   "CMakeFiles/4.0.2/CMakeSystem.cmake"
+  "/opt/homebrew/lib/cmake/SDL2/sdl2-config-version.cmake"
+  "/opt/homebrew/lib/cmake/SDL2/sdl2-config.cmake"
   "/opt/homebrew/share/cmake/Modules/CMakeCInformation.cmake"
   "/opt/homebrew/share/cmake/Modules/CMakeCXXInformation.cmake"
   "/opt/homebrew/share/cmake/Modules/CMakeCommonLanguageInclude.cmake"
@@ -24,6 +26,7 @@ set(CMAKE_MAKEFILE_DEPENDS
   "/opt/homebrew/share/cmake/Modules/Compiler/CMakeCommonCompilerMacros.cmake"
   "/opt/homebrew/share/cmake/Modules/Compiler/Clang.cmake"
   "/opt/homebrew/share/cmake/Modules/Compiler/GNU.cmake"
+  "/opt/homebrew/share/cmake/Modules/FeatureSummary.cmake"
   "/opt/homebrew/share/cmake/Modules/FindPackageHandleStandardArgs.cmake"
   "/opt/homebrew/share/cmake/Modules/FindPackageMessage.cmake"
   "/opt/homebrew/share/cmake/Modules/FindPkgConfig.cmake"
@@ -60,6 +63,5 @@ set(CMAKE_MAKEFILE_PRODUCTS
 
 # Dependency information for all targets:
 set(CMAKE_DEPEND_INFO_FILES
-  "CMakeFiles/schedule_app.dir/DependInfo.cmake"
-  "CMakeFiles/schedule_test.dir/DependInfo.cmake"
+  "CMakeFiles/edge.dir/DependInfo.cmake"
   )

@@ -1,55 +1,86 @@
-#ifndef DATABASE_HPP
-#define DATABASE_HPP
+/**
+ * @file Database.hpp
+ * @brief SQLite 数据库操作封装类
+ * @author Trae AI
+ * @date 2026-03-05
+ * 
+ * 封装了 sqlite3 的 C API，提供面向对象的数据库操作接口。
+ * 支持执行 SQL 语句、查询数据、事务处理等。
+ */
+
+#pragma once
 
 #include <sqlite3.h>
 #include <string>
-#include <stdexcept>
 #include <vector>
 #include <map>
+#include <stdexcept>
+#include <mutex>
 
 /**
+ * @class Database
  * @brief 数据库管理类
  * 
- * 负责 SQLite 数据库的连接管理（打开/关闭）以及执行 SQL 语句。
- * 采用 RAII (Resource Acquisition Is Initialization) 机制，
- * 在构造函数中打开数据库，在析构函数中自动关闭数据库。
+ * 使用 RAII 管理数据库连接资源。
+ * 提供简单的 execute 和 query 接口。
  */
 class Database {
 public:
     /**
-     * @brief 构造函数：创建 Database 对象并打开数据库连接
+     * @brief 构造函数，打开数据库连接
      * 
-     * @param dbPath SQLite 数据库文件的路径（例如 "schedule.db"）
-     * @throws std::runtime_error 如果无法打开数据库，将抛出运行时异常
+     * @param dbPath 数据库文件路径
+     * @throws std::runtime_error 如果打开失败抛出异常
      */
     Database(const std::string& dbPath);
 
     /**
-     * @brief 析构函数：销毁 Database 对象并关闭数据库连接
-     * 
-     * 确保在对象生命周期结束时释放数据库资源。
+     * @brief 析构函数，关闭数据库连接
      */
     ~Database();
 
-    // 禁止拷贝构造和赋值操作，以确保数据库连接的所有权唯一，避免重复关闭连接等问题
-    Database(const Database&) = delete;
-    Database& operator=(const Database&) = delete;
+    /**
+     * @brief 执行非查询 SQL 语句
+     * 
+     * 适用于 CREATE, INSERT, UPDATE, DELETE 等操作。
+     * 
+     * @param sql SQL 语句
+     * @return true 执行成功
+     * @throws std::runtime_error 如果执行出错抛出异常
+     */
+    bool execute(const std::string& sql);
 
     /**
-     * @brief 执行无返回结果的 SQL 语句
+     * @brief 执行查询 SQL 语句
      * 
-     * 适用于 CREATE TABLE, INSERT, UPDATE, DELETE 等操作。
+     * 适用于 SELECT 操作。
      * 
-     * @param sql 要执行的 SQL 查询字符串
-     * @throws std::runtime_error 如果 SQL 执行失败，将抛出运行时异常
+     * @param sql SQL 查询语句
+     * @return std::vector<std::map<std::string, std::string>> 
+     *         查询结果集，每行是一个 map (列名 -> 值)
+     * @throws std::runtime_error 如果查询出错抛出异常
      */
-    void execute(const std::string& sql);
+    std::vector<std::map<std::string, std::string>> query(const std::string& sql);
 
-    std::vector<std::map<std::string, std::string>> query(const std::string& sql) const;
+    /**
+     * @brief 开启事务
+     * @return true 成功
+     */
+    bool beginTransaction();
+
+    /**
+     * @brief 提交事务
+     * @return true 成功
+     */
+    bool commit();
+
+    /**
+     * @brief 回滚事务
+     * @return true 成功
+     */
+    bool rollback();
 
 private:
-    sqlite3* db_;         // SQLite 数据库连接句柄指针
-    std::string dbPath_;  // 数据库文件路径
+    sqlite3* db_; ///< SQLite 数据库连接句柄
+    std::mutex mutex_; ///< 数据库访问互斥锁
 };
-
-#endif // DATABASE_HPP

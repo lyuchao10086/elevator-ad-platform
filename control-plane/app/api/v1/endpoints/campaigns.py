@@ -24,6 +24,7 @@ _SLOT_PATTERN = re.compile(r"^(?:\*|(?:[01]\d|2[0-3]):[0-5]\d-(?:[01]\d|2[0-3]):
 _CAMPAIGN_STORE: Dict[str, Dict[str, Any]] = {}
 _CAMPAIGN_VERSION_STORE: Dict[str, Dict[str, Dict[str, Any]]] = {}
 _PUBLISH_BATCH_STORE: Dict[str, List[Dict[str, Any]]] = {}
+_RETRIED_BATCH_STORE: Dict[str, set] = {}
 
 
 def dt(v: Optional[datetime]):
@@ -815,10 +816,33 @@ def retry_failed_devices(campaign_id: str):
     if not schedule_json:
         return {"ok": False, "message": "invalid schedule_json"}
 
+    source_batch = _latest_batch_for_campaign(campaign_id)
+    source_batch_id = source_batch.get("batch_id") if source_batch else None
+
     try:
         failed_devices = db_service.get_latest_failed_campaign_devices(campaign_id)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"failed to query logs: {e}")
+
+    if source_batch_id:
+        marked = False
+        try:
+            marked = db_service.mark_campaign_retry_batch(campaign_id, source_batch_id)
+        except Exception:
+            # Fallback memory mark for local mode / db outage.
+            if _fallback_enabled():
+                retried = _RETRIED_BATCH_STORE.setdefault(campaign_id, set())
+                if source_batch_id not in retried:
+                    retried.add(source_batch_id)
+                    marked = True
+        if not marked:
+            return {
+                "ok": True,
+                "retried": 0,
+                "idempotent": True,
+                "source_batch_id": source_batch_id,
+                "message": "source batch already retried",
+            }
 
     failed_devices = [d for d in failed_devices if isinstance(d, str) and d.strip()]
     if not failed_devices:

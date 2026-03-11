@@ -1,6 +1,12 @@
 <template>
   <div class="master-map-container">
     <div class="left-panel">
+      <el-row justify="space-between" align="middle" style="margin-bottom:8px">
+        <el-col><h3>设备管理</h3></el-col>
+        <el-col>
+          <el-button type="primary" @click="openRegisterDialog">注册设备</el-button>
+        </el-col>
+      </el-row>
       <el-collapse v-model="filterCollapsed" accordion>
         <el-collapse-item title="筛选" name="1">
           <div class="filter-row">
@@ -16,6 +22,54 @@
           </div>
         </el-collapse-item>
       </el-collapse>
+
+      <el-dialog title="注册设备" v-model="registerDialogVisible" width="640px">
+        <el-form :model="registerForm" label-width="120px">
+          <el-form-item label="设备ID(可选)">
+            <el-input v-model="registerForm.device_id" placeholder="不填则服务器生成"></el-input>
+          </el-form-item>
+          <el-form-item label="名称">
+            <el-input v-model="registerForm.name" placeholder="设备友好名称"></el-input>
+          </el-form-item>
+          <el-form-item label="设备类型">
+            <el-input v-model="registerForm.device_type" placeholder="如: elevator"></el-input>
+          </el-form-item>
+          <el-form-item label="序列号">
+            <el-input v-model="registerForm.serial_no" placeholder="设备序列号"></el-input>
+          </el-form-item>
+          <el-form-item label="租户ID">
+            <el-input v-model="registerForm.tenant_id" placeholder="tenant id"></el-input>
+          </el-form-item>
+          <el-form-item label="所在城市">
+            <el-input v-model="registerForm.city" placeholder="城市名"></el-input>
+          </el-form-item>
+          <el-form-item label="经度">
+            <el-input v-model="registerForm.lon" placeholder="例如 114.3"></el-input>
+          </el-form-item>
+          <el-form-item label="纬度">
+            <el-input v-model="registerForm.lat" placeholder="例如 30.6"></el-input>
+          </el-form-item>
+          <el-form-item label="固件版本">
+            <el-input v-model="registerForm.firmware_version" placeholder="例如 v1.0.0"></el-input>
+          </el-form-item>
+          <el-form-item label="MAC">
+            <el-input v-model="registerForm.mac" placeholder="00:11:22:33:44:55"></el-input>
+          </el-form-item>
+          <el-form-item label="分组ID">
+            <el-input v-model="registerForm.group_id" placeholder="group id"></el-input>
+          </el-form-item>
+          <el-form-item label="标签 (逗号分隔)">
+            <el-input v-model="registerForm.tags" placeholder="tag1,tag2"></el-input>
+          </el-form-item>
+          <el-form-item label="位置/楼宇">
+            <el-input v-model="registerForm.location" placeholder="具体位置"></el-input>
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="registerDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="registerLoading" @click="submitRegister">提交注册</el-button>
+        </template>
+      </el-dialog>
 
       <div class="device-list">
         <div v-if="devices.length===0" class="empty">暂无设备数据</div>
@@ -93,11 +147,37 @@ export default {
       selectedId: null,
       hoveredId: null,
       expandedId: null,
-      filterCollapsed: ['1'],
-      refreshTimer: null
+      filterCollapsed: ['1']
+      , registerDialogVisible: false,
+      registerForm: { device_id: '', name: '', location: '', city: '', lat: '', lon: '', firmware_version: '', building: '' },
+      registerLoading: false
     }
   },
   methods: {
+    openRegisterDialog(){
+      this.registerForm = { device_id: '', name: '', location: '', city: '', lat: '', lon: '', firmware_version: '', building: '' }
+      this.registerDialogVisible = true
+    },
+    async submitRegister(){
+      if(this.registerLoading) return
+      this.registerLoading = true
+      try{
+        const payload = { ...this.registerForm }
+        // if device_id empty, server will generate
+        if(!payload.device_id) delete payload.device_id
+        const r = await api.post('/v1/devices/register', payload)
+        if(r && r.data){
+          this.$message.success('设备注册成功: ' + r.data.device_id)
+          this.registerDialogVisible = false
+          this.fetch()
+        }else{
+          this.$message.error('注册失败')
+        }
+      }catch(e){
+        console.error(e)
+        this.$message.error('注册出错')
+      }finally{ this.registerLoading = false }
+    },
     async fetch(){
       const params = { q: this.filters.q || undefined, page: this.page, page_size: this.pageSize }
       try{
@@ -108,46 +188,26 @@ export default {
           this.total = 0
           return
         }
-        
+        // apply simple client-side filter for city/status if backend not support
         let items = r.data?.items || []
-        // 客户端筛选逻辑
         if(this.filters.city){ items = items.filter(x => x.city === this.filters.city) }
         if(this.filters.status){ items = items.filter(x => x.status === this.filters.status) }
-        
         this.devices = items
         this.total = r.data?.total || items.length
-        
-        // 更新地图打点
+        this.cityOptions = Array.from(new Set((r.data?.items || []).map(i => i.city).filter(Boolean))).slice(0,50)
         this.updateMarkers()
-        
-        // 自动提取城市选项
-        if(this.cityOptions.length === 0) {
-          this.cityOptions = Array.from(new Set(items.map(i => i.city).filter(Boolean))).slice(0,50)
-        }
       }catch(e){
-        console.error('获取设备列表请求失败:', e)
-      }
-    },
-    mounted() {
-    this.initMap();
-    this.fetch();
-    
-    // 每 10 秒自动调用一次 fetch，从后端获取最新的 Redis 状态
-    this.refreshTimer = setInterval(() => {
-      this.fetch();
-      }, 10000);
-    },
-    beforeUnmount() {
-    // 销毁组件时清理定时器，防止内存泄漏
-      if (this.refreshTimer) {
-        clearInterval(this.refreshTimer);
+        this.$message.error('请求失败')
+        console.error(e)
       }
     },
     onFilterApply(){ this.page = 1; this.fetch() },
     onPage(p){ this.page = p; this.fetch() },
-    formatCoord(lat, lon){ if(!lat && !lon) return '-'; return `${lat}, ${lon}` },
+    formatCoord(lat, lon){ if(!lat && !lon) return '-'; return `${(lat||'')}, ${(lon||'')}` },
+    openDetail(row){ this.$router.push(`/devices/${row.device_id}`) },
     toggleDetail(d){
-      this.expandedId = (this.expandedId === d.device_id) ? null : d.device_id
+      if(this.expandedId === d.device_id) this.expandedId = null
+      else this.expandedId = d.device_id
     },
     quickCommand(row){
       this.$router.push({ path: '/commands', query: { target_device_id: row.device_id } })
@@ -157,57 +217,65 @@ export default {
     onCardClick(d){ this.selectedId = d.device_id; this.focusOnDevice(d); },
     initMap(){
       if(this.map) return
-      this.map = L.map('device-map', { center:[35.0, 103.0], zoom:4, preferCanvas:true })
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(this.map)
+      this.map = L.map('device-map', { center:[30.6,114.3], zoom:5, preferCanvas:true })
+      const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+      })
+      tiles.addTo(this.map)
+      // apply weak basemap style via CSS filter on tile pane
+      const tilePane = document.querySelector('#device-map .leaflet-tile-pane')
+      if(tilePane) tilePane.style.filter = 'grayscale(60%) contrast(90%) brightness(95%)'
+    },
+    resetMapView(){
+      if(!this.map) this.initMap()
+      try{
+        // center and zoom to show mainland China nicely
+        this.map.setView([35.0, 103.0], 4)
+      }catch(e){ console.warn('resetMapView failed', e) }
     },
     updateMarkers(){
-      if(!this.map) return
-      // 这里的逻辑通常是清除旧 marker 重新画，
-      // 但为了平滑，可以只更新颜色或只在数量变化时重画
-      // 此处保持你原本的逻辑...
-      Object.values(this.markersMap).forEach(m => this.map.removeLayer(m))
+      if(!this.map) this.initMap()
+      // remove old markers
+      Object.values(this.markersMap).forEach(m => { try{ this.map.removeLayer(m) }catch(e){} })
       this.markersMap = {}
+      const bounds = []
       for(const d of this.devices){
-        const lat = parseFloat(d.lat); const lon = parseFloat(d.lon)
+        const lat = parseFloat(d.lat)
+        const lon = parseFloat(d.lon)
         if(!Number.isFinite(lat) || !Number.isFinite(lon)) continue
-        
-        // 地图小圆点的颜色也根据 status 变化
-        const markerColor = d.status === 'online' ? BRAND_COLOR : '#d9d9d9'
         const marker = L.circleMarker([lat, lon], {
-          radius: 7, color: '#fff', weight: 1, fillColor: markerColor, fillOpacity: 1
-        }).addTo(this.map)
-        
+          radius: 7,
+          color: '#ffffff',
+          weight: 1,
+          fillColor: BRAND_COLOR,
+          fillOpacity: 1
+        })
+        marker.addTo(this.map)
+        marker.on('mouseover', () => { this.hoveredId = d.device_id; this.scrollCardIntoView(d.device_id); this.setMarkerHoverStyle(d.device_id, true) })
+        marker.on('mouseout', () => { if(this.hoveredId===d.device_id) this.hoveredId = null; this.setMarkerHoverStyle(d.device_id, false) })
+        marker.on('click', () => { this.selectedId = d.device_id; this.focusOnDevice(d) })
         this.markersMap[d.device_id] = marker
+        bounds.push([lat, lon])
       }
+      if(bounds.length===1){ this.map.setView(bounds[0], 12) }
+      else if(bounds.length>1){ this.map.fitBounds(bounds, { padding:[60,60] }) }
     },
-    resetMapView(){ this.map.setView([35.0, 103.0], 4) },
     highlightMarker(id, hover){
-      const m = this.markersMap[id]; if(!m) return
-      m.setStyle(hover ? { radius: 10, weight: 2 } : { radius: 7, weight: 1 })
+      const m = this.markersMap[id]
+      if(!m) return
+      if(hover){ m.setStyle({ radius: 10, weight:2, color:'#fff' }) }
+      else { m.setStyle({ radius:7, weight:1, color:'#fff' }) }
     },
-    focusOnDevice(d){
-       const lat=parseFloat(d.lat), lon=parseFloat(d.lon)
-       if(Number.isFinite(lat)) this.map.flyTo([lat, lon], 12)
+    setMarkerHoverStyle(id, hover){ this.highlightMarker(id, hover) },
+    focusOnDevice(d){ const lat=parseFloat(d.lat), lon=parseFloat(d.lon); if(Number.isFinite(lat)&&Number.isFinite(lon)){ this.map.flyTo([lat,lon], 12, {duration:0.6}) } },
+    scrollCardIntoView(id){ // ensure card is visible in left panel
+      this.$nextTick(()=>{
+        const el = this.$el.querySelector(`.device-card[data-id="${id}"]`)
+        if(el && el.scrollIntoView) el.scrollIntoView({ block:'center', behavior:'smooth' })
+      })
     }
   },
-  mounted() {
-    // ⚠️ 合并后的唯一 mounted
-    this.initMap();
-    this.fetch();
-    
-    // 设置每 5 秒刷新一次 (Redis 心跳较快，5秒体验更好)
-    this.refreshTimer = setInterval(() => {
-      this.fetch();
-      console.log('自动刷新设备状态...');
-    }, 5000);
-  },
-  beforeUnmount() {
-    // 离开页面必须销毁定时器
-    if (this.refreshTimer) {
-      clearInterval(this.refreshTimer);
-      this.refreshTimer = null;
-    }
-  }
+  mounted(){ this.initMap(); this.fetch() }
 }
 </script>
 

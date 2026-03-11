@@ -4,6 +4,7 @@ import DeviceList from '../pages/DeviceList.vue'
 import Commands from '../pages/Commands.vue'
 import Materials from '../pages/Materials.vue'
 import Campaigns from '../pages/Campaigns.vue'
+import AdLogs from '../pages/AdLogs.vue'
 
 const routes = [
   { path: '/', name: 'Dashboard', component: Dashboard },
@@ -11,6 +12,7 @@ const routes = [
   { path: '/commands', name: 'Commands', component: Commands },
   { path: '/materials', name: 'Materials', component: Materials },
   { path: '/campaigns', name: 'Campaigns', component: Campaigns },
+  { path: '/ad-logs', name: 'AdLogs', component: AdLogs },
 ]
 
 const router = createRouter({

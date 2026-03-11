@@ -1,0 +1,12 @@
+{
+    "db_path": "resources/edge.db",
+    "resources_dir": "resources/",
+    "ads_config_path": "resources/Ads.json",
+    "schedule_config_path": "resources/Schedule.json",
+    "cloud_api_url": "ws://127.0.0.1:8080/",
+    "gateway_ws_url": "ws://127.0.0.1:8080/",
+    "device_id": "ELEV_001",
+    "token": "sk_15b3acb1b0b84b01be6c7085e1271837",
+    "log_level": 1
+}
+ 

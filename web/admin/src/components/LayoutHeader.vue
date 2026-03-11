@@ -1,16 +1,12 @@
 <template>
   <header class="layout-header">
-    <div class="left">
-      <el-input placeholder="搜索（设备、素材）" v-model="q" size="small" style="width:320px" @keyup.enter="onSearch"/>
-    </div>
-    <div class="right">
-      <el-button type="warning" size="small" @click="$router.push('/commands')">确定</el-button>
-    </div>
+    <div class="left"></div>
+    <div class="right"></div>
   </header>
 </template>
 
 <script>
-export default { data(){return {q:''}}, methods:{ onSearch(){ this.$emit('search', this.q) } } }
+export default {}
 </script>
 
 <style scoped>

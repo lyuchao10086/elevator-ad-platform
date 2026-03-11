@@ -57,10 +57,10 @@ RM = /opt/homebrew/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /Users/lyuchao/Documents/trae_projects/schedule
+CMAKE_SOURCE_DIR = /Users/lyuchao/Documents/trae_projects/edge
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /Users/lyuchao/Documents/trae_projects/schedule/build
+CMAKE_BINARY_DIR = /Users/lyuchao/Documents/trae_projects/edge/build
 
 #=============================================================================
 # Targets provided globally by CMake.
@@ -87,9 +87,9 @@ rebuild_cache/fast: rebuild_cache
 
 # The main all target
 all: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /Users/lyuchao/Documents/trae_projects/schedule/build/CMakeFiles /Users/lyuchao/Documents/trae_projects/schedule/build//CMakeFiles/progress.marks
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/lyuchao/Documents/trae_projects/edge/build/CMakeFiles /Users/lyuchao/Documents/trae_projects/edge/build//CMakeFiles/progress.marks
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 all
-	$(CMAKE_COMMAND) -E cmake_progress_start /Users/lyuchao/Documents/trae_projects/schedule/build/CMakeFiles 0
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/lyuchao/Documents/trae_projects/edge/build/CMakeFiles 0
 .PHONY : all
 
 # The main clean target
@@ -117,38 +117,24 @@ depend:
 .PHONY : depend
 
 #=============================================================================
-# Target rules for targets named schedule_app
+# Target rules for targets named edge
 
 # Build rule for target.
-schedule_app: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 schedule_app
-.PHONY : schedule_app
+edge: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 edge
+.PHONY : edge
 
 # fast build rule for target.
-schedule_app/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/build
-.PHONY : schedule_app/fast
-
-#=============================================================================
-# Target rules for targets named schedule_test
-
-# Build rule for target.
-schedule_test: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 schedule_test
-.PHONY : schedule_test
-
-# fast build rule for target.
-schedule_test/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/build
-.PHONY : schedule_test/fast
+edge/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/edge.dir/build.make CMakeFiles/edge.dir/build
+.PHONY : edge/fast
 
 src/Database.o: src/Database.cpp.o
 .PHONY : src/Database.o
 
 # target to build an object file
 src/Database.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/Database.cpp.o
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/Database.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/edge.dir/build.make CMakeFiles/edge.dir/src/Database.cpp.o
 .PHONY : src/Database.cpp.o
 
 src/Database.i: src/Database.cpp.i
@@ -156,8 +142,7 @@ src/Database.i: src/Database.cpp.i
 
 # target to preprocess a source file
 src/Database.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/Database.cpp.i
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/Database.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/edge.dir/build.make CMakeFiles/edge.dir/src/Database.cpp.i
 .PHONY : src/Database.cpp.i
 
 src/Database.s: src/Database.cpp.s
@@ -165,43 +150,87 @@ src/Database.s: src/Database.cpp.s
 
 # target to generate assembly for a file
 src/Database.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/Database.cpp.s
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/Database.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/edge.dir/build.make CMakeFiles/edge.dir/src/Database.cpp.s
 .PHONY : src/Database.cpp.s
 
-src/ScheduleManager.o: src/ScheduleManager.cpp.o
-.PHONY : src/ScheduleManager.o
+src/EdgeManager.o: src/EdgeManager.cpp.o
+.PHONY : src/EdgeManager.o
 
 # target to build an object file
-src/ScheduleManager.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/ScheduleManager.cpp.o
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/ScheduleManager.cpp.o
-.PHONY : src/ScheduleManager.cpp.o
+src/EdgeManager.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/edge.dir/build.make CMakeFiles/edge.dir/src/EdgeManager.cpp.o
+.PHONY : src/EdgeManager.cpp.o
 
-src/ScheduleManager.i: src/ScheduleManager.cpp.i
-.PHONY : src/ScheduleManager.i
+src/EdgeManager.i: src/EdgeManager.cpp.i
+.PHONY : src/EdgeManager.i
 
 # target to preprocess a source file
-src/ScheduleManager.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/ScheduleManager.cpp.i
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/ScheduleManager.cpp.i
-.PHONY : src/ScheduleManager.cpp.i
+src/EdgeManager.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/edge.dir/build.make CMakeFiles/edge.dir/src/EdgeManager.cpp.i
+.PHONY : src/EdgeManager.cpp.i
 
-src/ScheduleManager.s: src/ScheduleManager.cpp.s
-.PHONY : src/ScheduleManager.s
+src/EdgeManager.s: src/EdgeManager.cpp.s
+.PHONY : src/EdgeManager.s
 
 # target to generate assembly for a file
-src/ScheduleManager.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/ScheduleManager.cpp.s
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/ScheduleManager.cpp.s
-.PHONY : src/ScheduleManager.cpp.s
+src/EdgeManager.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/edge.dir/build.make CMakeFiles/edge.dir/src/EdgeManager.cpp.s
+.PHONY : src/EdgeManager.cpp.s
+
+src/NetworkClient.o: src/NetworkClient.cpp.o
+.PHONY : src/NetworkClient.o
+
+# target to build an object file
+src/NetworkClient.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/edge.dir/build.make CMakeFiles/edge.dir/src/NetworkClient.cpp.o
+.PHONY : src/NetworkClient.cpp.o
+
+src/NetworkClient.i: src/NetworkClient.cpp.i
+.PHONY : src/NetworkClient.i
+
+# target to preprocess a source file
+src/NetworkClient.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/edge.dir/build.make CMakeFiles/edge.dir/src/NetworkClient.cpp.i
+.PHONY : src/NetworkClient.cpp.i
+
+src/NetworkClient.s: src/NetworkClient.cpp.s
+.PHONY : src/NetworkClient.s
+
+# target to generate assembly for a file
+src/NetworkClient.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/edge.dir/build.make CMakeFiles/edge.dir/src/NetworkClient.cpp.s
+.PHONY : src/NetworkClient.cpp.s
+
+src/VideoPlayer.o: src/VideoPlayer.cpp.o
+.PHONY : src/VideoPlayer.o
+
+# target to build an object file
+src/VideoPlayer.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/edge.dir/build.make CMakeFiles/edge.dir/src/VideoPlayer.cpp.o
+.PHONY : src/VideoPlayer.cpp.o
+
+src/VideoPlayer.i: src/VideoPlayer.cpp.i
+.PHONY : src/VideoPlayer.i
+
+# target to preprocess a source file
+src/VideoPlayer.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/edge.dir/build.make CMakeFiles/edge.dir/src/VideoPlayer.cpp.i
+.PHONY : src/VideoPlayer.cpp.i
+
+src/VideoPlayer.s: src/VideoPlayer.cpp.s
+.PHONY : src/VideoPlayer.s
+
+# target to generate assembly for a file
+src/VideoPlayer.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/edge.dir/build.make CMakeFiles/edge.dir/src/VideoPlayer.cpp.s
+.PHONY : src/VideoPlayer.cpp.s
 
 src/main.o: src/main.cpp.o
 .PHONY : src/main.o
 
 # target to build an object file
 src/main.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/main.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/edge.dir/build.make CMakeFiles/edge.dir/src/main.cpp.o
 .PHONY : src/main.cpp.o
 
 src/main.i: src/main.cpp.i
@@ -209,7 +238,7 @@ src/main.i: src/main.cpp.i
 
 # target to preprocess a source file
 src/main.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/main.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/edge.dir/build.make CMakeFiles/edge.dir/src/main.cpp.i
 .PHONY : src/main.cpp.i
 
 src/main.s: src/main.cpp.s
@@ -217,167 +246,8 @@ src/main.s: src/main.cpp.s
 
 # target to generate assembly for a file
 src/main.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/main.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/edge.dir/build.make CMakeFiles/edge.dir/src/main.cpp.s
 .PHONY : src/main.cpp.s
-
-src/models/Asset.o: src/models/Asset.cpp.o
-.PHONY : src/models/Asset.o
-
-# target to build an object file
-src/models/Asset.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/models/Asset.cpp.o
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/models/Asset.cpp.o
-.PHONY : src/models/Asset.cpp.o
-
-src/models/Asset.i: src/models/Asset.cpp.i
-.PHONY : src/models/Asset.i
-
-# target to preprocess a source file
-src/models/Asset.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/models/Asset.cpp.i
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/models/Asset.cpp.i
-.PHONY : src/models/Asset.cpp.i
-
-src/models/Asset.s: src/models/Asset.cpp.s
-.PHONY : src/models/Asset.s
-
-# target to generate assembly for a file
-src/models/Asset.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/models/Asset.cpp.s
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/models/Asset.cpp.s
-.PHONY : src/models/Asset.cpp.s
-
-src/models/Interrupt.o: src/models/Interrupt.cpp.o
-.PHONY : src/models/Interrupt.o
-
-# target to build an object file
-src/models/Interrupt.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/models/Interrupt.cpp.o
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/models/Interrupt.cpp.o
-.PHONY : src/models/Interrupt.cpp.o
-
-src/models/Interrupt.i: src/models/Interrupt.cpp.i
-.PHONY : src/models/Interrupt.i
-
-# target to preprocess a source file
-src/models/Interrupt.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/models/Interrupt.cpp.i
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/models/Interrupt.cpp.i
-.PHONY : src/models/Interrupt.cpp.i
-
-src/models/Interrupt.s: src/models/Interrupt.cpp.s
-.PHONY : src/models/Interrupt.s
-
-# target to generate assembly for a file
-src/models/Interrupt.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/models/Interrupt.cpp.s
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/models/Interrupt.cpp.s
-.PHONY : src/models/Interrupt.cpp.s
-
-src/models/PlayItem.o: src/models/PlayItem.cpp.o
-.PHONY : src/models/PlayItem.o
-
-# target to build an object file
-src/models/PlayItem.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/models/PlayItem.cpp.o
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/models/PlayItem.cpp.o
-.PHONY : src/models/PlayItem.cpp.o
-
-src/models/PlayItem.i: src/models/PlayItem.cpp.i
-.PHONY : src/models/PlayItem.i
-
-# target to preprocess a source file
-src/models/PlayItem.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/models/PlayItem.cpp.i
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/models/PlayItem.cpp.i
-.PHONY : src/models/PlayItem.cpp.i
-
-src/models/PlayItem.s: src/models/PlayItem.cpp.s
-.PHONY : src/models/PlayItem.s
-
-# target to generate assembly for a file
-src/models/PlayItem.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/models/PlayItem.cpp.s
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/models/PlayItem.cpp.s
-.PHONY : src/models/PlayItem.cpp.s
-
-src/models/Schedule.o: src/models/Schedule.cpp.o
-.PHONY : src/models/Schedule.o
-
-# target to build an object file
-src/models/Schedule.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/models/Schedule.cpp.o
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/models/Schedule.cpp.o
-.PHONY : src/models/Schedule.cpp.o
-
-src/models/Schedule.i: src/models/Schedule.cpp.i
-.PHONY : src/models/Schedule.i
-
-# target to preprocess a source file
-src/models/Schedule.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/models/Schedule.cpp.i
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/models/Schedule.cpp.i
-.PHONY : src/models/Schedule.cpp.i
-
-src/models/Schedule.s: src/models/Schedule.cpp.s
-.PHONY : src/models/Schedule.s
-
-# target to generate assembly for a file
-src/models/Schedule.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/models/Schedule.cpp.s
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/models/Schedule.cpp.s
-.PHONY : src/models/Schedule.cpp.s
-
-src/models/TimeSlot.o: src/models/TimeSlot.cpp.o
-.PHONY : src/models/TimeSlot.o
-
-# target to build an object file
-src/models/TimeSlot.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/models/TimeSlot.cpp.o
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/models/TimeSlot.cpp.o
-.PHONY : src/models/TimeSlot.cpp.o
-
-src/models/TimeSlot.i: src/models/TimeSlot.cpp.i
-.PHONY : src/models/TimeSlot.i
-
-# target to preprocess a source file
-src/models/TimeSlot.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/models/TimeSlot.cpp.i
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/models/TimeSlot.cpp.i
-.PHONY : src/models/TimeSlot.cpp.i
-
-src/models/TimeSlot.s: src/models/TimeSlot.cpp.s
-.PHONY : src/models/TimeSlot.s
-
-# target to generate assembly for a file
-src/models/TimeSlot.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_app.dir/build.make CMakeFiles/schedule_app.dir/src/models/TimeSlot.cpp.s
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/models/TimeSlot.cpp.s
-.PHONY : src/models/TimeSlot.cpp.s
-
-src/test.o: src/test.cpp.o
-.PHONY : src/test.o
-
-# target to build an object file
-src/test.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/test.cpp.o
-.PHONY : src/test.cpp.o
-
-src/test.i: src/test.cpp.i
-.PHONY : src/test.i
-
-# target to preprocess a source file
-src/test.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/test.cpp.i
-.PHONY : src/test.cpp.i
-
-src/test.s: src/test.cpp.s
-.PHONY : src/test.s
-
-# target to generate assembly for a file
-src/test.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/schedule_test.dir/build.make CMakeFiles/schedule_test.dir/src/test.cpp.s
-.PHONY : src/test.cpp.s
 
 # Help Target
 help:
@@ -387,35 +257,22 @@ help:
 	@echo "... depend"
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
-	@echo "... schedule_app"
-	@echo "... schedule_test"
+	@echo "... edge"
 	@echo "... src/Database.o"
 	@echo "... src/Database.i"
 	@echo "... src/Database.s"
-	@echo "... src/ScheduleManager.o"
-	@echo "... src/ScheduleManager.i"
-	@echo "... src/ScheduleManager.s"
+	@echo "... src/EdgeManager.o"
+	@echo "... src/EdgeManager.i"
+	@echo "... src/EdgeManager.s"
+	@echo "... src/NetworkClient.o"
+	@echo "... src/NetworkClient.i"
+	@echo "... src/NetworkClient.s"
+	@echo "... src/VideoPlayer.o"
+	@echo "... src/VideoPlayer.i"
+	@echo "... src/VideoPlayer.s"
 	@echo "... src/main.o"
 	@echo "... src/main.i"
 	@echo "... src/main.s"
-	@echo "... src/models/Asset.o"
-	@echo "... src/models/Asset.i"
-	@echo "... src/models/Asset.s"
-	@echo "... src/models/Interrupt.o"
-	@echo "... src/models/Interrupt.i"
-	@echo "... src/models/Interrupt.s"
-	@echo "... src/models/PlayItem.o"
-	@echo "... src/models/PlayItem.i"
-	@echo "... src/models/PlayItem.s"
-	@echo "... src/models/Schedule.o"
-	@echo "... src/models/Schedule.i"
-	@echo "... src/models/Schedule.s"
-	@echo "... src/models/TimeSlot.o"
-	@echo "... src/models/TimeSlot.i"
-	@echo "... src/models/TimeSlot.s"
-	@echo "... src/test.o"
-	@echo "... src/test.i"
-	@echo "... src/test.s"
 .PHONY : help
 
 

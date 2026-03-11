@@ -221,10 +221,307 @@ def get_material(material_id: str):
         conn.close()
 
 
+def list_commands(limit=100, offset=0, q=None, device_id=None, action=None, from_ts=None, to_ts=None):
+    """
+    从数据库读取 `command_logs` 表，返回记录列表。
+    支持按 `device_id` 或通用查询字符串 `q` 过滤（匹配 cmd_id / device_id / action）。
+    将可能为毫秒的 `send_ts` 转换为秒以兼容前端。
+    返回: list[dict]
+    """
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        sql = "SELECT * FROM command_logs"
+        params = []
+        where = []
+        if device_id:
+            where.append("device_id = %s")
+            params.append(device_id)
+        if action:
+            where.append("action = %s")
+            params.append(action)
+        # time range: accept from_ts/to_ts in seconds; DB may store seconds or milliseconds
+        if from_ts is not None and to_ts is not None:
+            # compare both seconds and milliseconds ranges to be robust
+            where.append("((send_ts BETWEEN %s AND %s) OR (send_ts BETWEEN %s AND %s))")
+            params.extend([from_ts, to_ts, int(from_ts*1000), int(to_ts*1000)])
+        elif from_ts is not None:
+            where.append("(send_ts >= %s OR send_ts >= %s)")
+            params.extend([from_ts, int(from_ts*1000)])
+        elif to_ts is not None:
+            where.append("(send_ts <= %s OR send_ts <= %s)")
+            params.extend([to_ts, int(to_ts*1000)])
+        if q:
+            where.append("(cmd_id ILIKE %s OR device_id ILIKE %s OR action ILIKE %s)")
+            like = f"%{q}%"
+            params.extend([like, like, like])
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY send_ts DESC NULLS LAST, created_at DESC NULLS LAST LIMIT %s OFFSET %s"
+        params.extend([limit, offset])
+        try:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+        except UnicodeDecodeError:
+            # fallback to latin1 decoding
+            try:
+                conn.set_client_encoding('LATIN1')
+            except Exception:
+                pass
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+
+        # Normalize rows for frontend
+        for r in rows:
+            if 'cmd_id' not in r and 'id' in r:
+                r['cmd_id'] = r.get('id')
+            # ensure params/result present
+            r['params'] = r.get('params') or r.get('params_json') or {}
+            r['result'] = r.get('result') or r.get('data') or r.get('response') or {}
+            # convert send_ts from ms to s if needed
+            st = r.get('send_ts')
+            try:
+                if st is None:
+                    r['send_ts'] = None
+                else:
+                    if isinstance(st, (int, float)) and st > 1e12:
+                        r['send_ts'] = int(st // 1000)
+                    else:
+                        r['send_ts'] = int(st)
+            except Exception:
+                r['send_ts'] = r.get('send_ts')
+
+        return rows
+    finally:
+        conn.close()
+
+
+def count_commands(q=None, device_id=None, action=None, from_ts=None, to_ts=None):
+    """Return total count of records in command_logs matching optional filters."""
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        sql = "SELECT COUNT(1) FROM command_logs"
+        params = []
+        where = []
+        if device_id:
+            where.append("device_id = %s")
+            params.append(device_id)
+        if action:
+            where.append("action = %s")
+            params.append(action)
+        if from_ts is not None and to_ts is not None:
+            where.append("((send_ts BETWEEN %s AND %s) OR (send_ts BETWEEN %s AND %s))")
+            params.extend([from_ts, to_ts, int(from_ts*1000), int(to_ts*1000)])
+        elif from_ts is not None:
+            where.append("(send_ts >= %s OR send_ts >= %s)")
+            params.extend([from_ts, int(from_ts*1000)])
+        elif to_ts is not None:
+            where.append("(send_ts <= %s OR send_ts <= %s)")
+            params.extend([to_ts, int(to_ts*1000)])
+        if q:
+            where.append("(cmd_id ILIKE %s OR device_id ILIKE %s OR action ILIKE %s)")
+            like = f"%{q}%"
+            params.extend([like, like, like])
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        cur.execute(sql, params)
+        return int(cur.fetchone()[0])
+    finally:
+        conn.close()
+
+
+def list_ad_logs(limit=100, offset=0, device_id=None, ad_file_name=None, from_ts=None, to_ts=None, q=None):
+    """
+    列出 ad_logs 表内容，支持按 device_id、ad_file_name、时间范围和通用查询过滤。
+    返回 list[dict]
+    """
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        # 左连接 materials 表以获取素材记录中的 duration_sec（单位：秒）
+        sql = "SELECT ad_logs.*, m.duration_sec AS material_duration_sec, m.advertiser AS advertiser FROM ad_logs LEFT JOIN materials m ON m.file_name = ad_logs.ad_file_name"
+        params = []
+        where = []
+        if device_id:
+            where.append("device_id = %s")
+            params.append(device_id)
+        if ad_file_name:
+            where.append("ad_file_name ILIKE %s")
+            params.append(f"%{ad_file_name}%")
+        if from_ts is not None and to_ts is not None:
+            where.append("(start_time BETWEEN %s AND %s)")
+            params.extend([from_ts, to_ts])
+        elif from_ts is not None:
+            where.append("(start_time >= %s)")
+            params.append(from_ts)
+        elif to_ts is not None:
+            where.append("(start_time <= %s)")
+            params.append(to_ts)
+        if q:
+            where.append("(log_id ILIKE %s OR device_id ILIKE %s OR ad_file_name ILIKE %s)")
+            like = f"%{q}%"
+            params.extend([like, like, like])
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY start_time DESC NULLS LAST, created_at DESC NULLS LAST LIMIT %s OFFSET %s"
+        params.extend([limit, offset])
+        try:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+        except UnicodeDecodeError:
+            try:
+                conn.set_client_encoding('LATIN1')
+            except Exception:
+                pass
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+
+        # ensure expected keys present for frontend and compute completion_rate/play_result
+        for r in rows:
+            r.setdefault('log_id', r.get('log_id') or r.get('id'))
+            r.setdefault('device_id', r.get('device_id'))
+            r.setdefault('ad_file_name', r.get('ad_file_name'))
+            r.setdefault('start_time', r.get('start_time'))
+            r.setdefault('end_time', r.get('end_time'))
+            r.setdefault('duration_ms', r.get('duration_ms'))
+            r.setdefault('status_code', r.get('status_code'))
+            r.setdefault('expected_md5', r.get('expected_md5'))
+            r.setdefault('actual_md5', r.get('actual_md5'))
+            r.setdefault('is_valid', r.get('is_valid'))
+            r.setdefault('advertiser', r.get('advertiser') or '')
+            r.setdefault('billing_status', r.get('billing_status'))
+            r.setdefault('created_at', r.get('created_at'))
+
+            # compute completion rate and play result
+            try:
+                # If is_valid explicitly false, treat as not played
+                if r.get('is_valid') is False:
+                    r['completion_rate'] = 0.0
+                    r['play_result'] = '未播放'
+                else:
+                    dur_ms = r.get('duration_ms')
+                    mat_sec = r.get('material_duration_sec')
+                    if dur_ms is None or mat_sec is None or mat_sec == 0:
+                        r['completion_rate'] = None
+                        r['play_result'] = 'unknown'
+                    else:
+                        denom = float(mat_sec) * 1000.0
+                        if denom <= 0:
+                            r['completion_rate'] = None
+                            r['play_result'] = 'unknown'
+                        else:
+                            rate = float(dur_ms) / denom
+                            # clamp to sensible range
+                            if rate < 0:
+                                rate = 0.0
+                            if rate > 10:
+                                rate = 10.0
+                            r['completion_rate'] = round(rate, 4)
+                            # 判定：>95% 完播，<10% 未播放，其余 未完播
+                            if rate > 0.95:
+                                r['play_result'] = '完播'
+                            elif rate < 0.10:
+                                r['play_result'] = '未播放'
+                            else:
+                                r['play_result'] = '未完播'
+            except Exception:
+                r['completion_rate'] = None
+                r['play_result'] = 'unknown'
+
+        return rows
+    finally:
+        conn.close()
+
+
+def count_ad_logs(device_id=None, ad_file_name=None, from_ts=None, to_ts=None, q=None):
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        sql = "SELECT COUNT(1) FROM ad_logs"
+        params = []
+        where = []
+        if device_id:
+            where.append("device_id = %s")
+            params.append(device_id)
+        if ad_file_name:
+            where.append("ad_file_name ILIKE %s")
+            params.append(f"%{ad_file_name}%")
+        if from_ts is not None and to_ts is not None:
+            where.append("(start_time BETWEEN %s AND %s)")
+            params.extend([from_ts, to_ts])
+        elif from_ts is not None:
+            where.append("(start_time >= %s)")
+            params.append(from_ts)
+        elif to_ts is not None:
+            where.append("(start_time <= %s)")
+            params.append(to_ts)
+        if q:
+            where.append("(log_id ILIKE %s OR device_id ILIKE %s OR ad_file_name ILIKE %s)")
+            like = f"%{q}%"
+            params.extend([like, like, like])
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        cur.execute(sql, params)
+        return int(cur.fetchone()[0])
+    finally:
+        conn.close()
+
+
+def get_ad_log(log_id: str):
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        # 左连接 materials 以获取素材 duration_sec
+        sql = "SELECT ad_logs.*, m.duration_sec AS material_duration_sec FROM ad_logs LEFT JOIN materials m ON m.file_name = ad_logs.ad_file_name WHERE ad_logs.log_id = %s"
+        cur.execute(sql, [log_id])
+        row = cur.fetchone()
+        if not row:
+            return None
+
+        # compute completion_rate and play_result (reuse logic from list_ad_logs)
+        try:
+            if row.get('is_valid') is False:
+                row['completion_rate'] = 0.0
+                row['play_result'] = '未播放'
+            else:
+                dur_ms = row.get('duration_ms')
+                mat_sec = row.get('material_duration_sec')
+                if dur_ms is None or mat_sec is None or mat_sec == 0:
+                    row['completion_rate'] = None
+                    row['play_result'] = 'unknown'
+                else:
+                    denom = float(mat_sec) * 1000.0
+                    if denom <= 0:
+                        row['completion_rate'] = None
+                        row['play_result'] = 'unknown'
+                    else:
+                        rate = float(dur_ms) / denom
+                        if rate < 0:
+                            rate = 0.0
+                        if rate > 10:
+                            rate = 10.0
+                        row['completion_rate'] = round(rate, 4)
+                        if rate > 0.95:
+                            row['play_result'] = '完播'
+                        elif rate < 0.10:
+                            row['play_result'] = '未播放'
+                        else:
+                            row['play_result'] = '未完播'
+        except Exception:
+            row['completion_rate'] = None
+            row['play_result'] = 'unknown'
+
+        return row
+    finally:
+        conn.close()
+
+
 def list_campaigns(limit=100, offset=0):
     conn = get_conn()
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
+        ensure_campaign_tables(cur)
         sql = "SELECT * FROM campaigns ORDER BY campaign_id LIMIT %s OFFSET %s"
         params = [limit, offset]
         cur.execute(sql, params)
@@ -238,6 +535,7 @@ def get_campaign(campaign_id: str):
     conn = get_conn()
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
+        ensure_campaign_tables(cur)
         sql = "SELECT * FROM campaigns WHERE campaign_id = %s"
         cur.execute(sql, [campaign_id])
         row = cur.fetchone()
@@ -250,6 +548,7 @@ def update_campaign_status(campaign_id: str, status: str):
     conn = get_conn()
     try:
         cur = conn.cursor()
+        ensure_campaign_tables(cur)
         sql = "UPDATE campaigns SET status = %s, updated_at = now() WHERE campaign_id = %s"
         cur.execute(sql, [status, campaign_id])
         conn.commit()
@@ -265,6 +564,7 @@ def insert_campaign(meta: dict):
     conn = get_conn()
     try:
         cur = conn.cursor()
+        ensure_campaign_tables(cur)
         cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'campaigns'")
         cols = {r[0] for r in cur.fetchall()}
 
@@ -303,15 +603,180 @@ def insert_campaign(meta: dict):
         conn.close()
 
 
-def insert_device(device_id: str, location: str = None, status: str = "online") -> None:
+def insert_device(**meta):
+    """
+    Insert or upsert a device record into `devices` table.
+    Accepts keyword args matching column names (e.g., device_id, name, lon, lat, tenant_id, tags, status, ...)
+    """
+    if 'device_id' not in meta:
+        raise RuntimeError('device_id is required to insert_device')
+
     conn = get_conn()
     try:
         cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO devices (device_id, location, status, created_at) VALUES (%s, %s, %s, NOW())",
-            (device_id, location, status),
-        )
+        # discover existing device columns
+        cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'devices'")
+        cols = {r[0] for r in cur.fetchall()}
+
+        use_cols = [k for k in meta.keys() if k in cols]
+        if not use_cols:
+            # nothing to insert
+            return
+
+        values = []
+        for c in use_cols:
+            v = meta.get(c)
+            # convert tags to Json where appropriate
+            if c == 'tags':
+                try:
+                    from psycopg2.extras import Json as PgJson
+                    values.append(PgJson(v) if v is not None else None)
+                except Exception:
+                    values.append(v)
+            else:
+                values.append(v)
+
+        col_list = ','.join(use_cols)
+        placeholders = ','.join(['%s'] * len(use_cols))
+
+        # upsert: update other columns on conflict of device_id
+        update_cols = [c for c in use_cols if c != 'device_id']
+        if update_cols:
+            update_clause = ','.join([f"{c}=EXCLUDED.{c}" for c in update_cols])
+            sql = f"INSERT INTO devices ({col_list}) VALUES ({placeholders}) ON CONFLICT (device_id) DO UPDATE SET {update_clause}, updated_at = NOW()"
+        else:
+            sql = f"INSERT INTO devices ({col_list}) VALUES ({placeholders}) ON CONFLICT (device_id) DO NOTHING"
+
+        cur.execute(sql, values)
         conn.commit()
+    finally:
+        conn.close()
+
+
+def insert_command(meta: dict):
+    """
+    Persist a command log into `command_logs` table.
+    Accepts a dict with keys like: cmd_id, device_id, action, params, status, result, send_ts, created_at, updated_at
+    Returns the inserted row id if available (column 'id'), otherwise None.
+    """
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        # discover existing columns to build compatible insert
+        cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'command_logs'")
+        cols = {r[0] for r in cur.fetchall()}
+
+        if not cols:
+            raise RuntimeError('command_logs table not found or has no columns')
+
+        # Build insert columns based on keys provided in meta that exist in the table
+        use_cols = [k for k in meta.keys() if k in cols]
+
+        # If created_at column exists but not provided, set it to NOW()
+        include_created_now = False
+        if 'created_at' in cols and 'created_at' not in use_cols:
+            include_created_now = True
+
+        if not use_cols and not include_created_now:
+            raise RuntimeError('no compatible columns to insert into command_logs')
+
+        values = []
+        for c in use_cols:
+            v = meta.get(c)
+            if c in ('params', 'result'):
+                values.append(Json(v) if v is not None else None)
+            else:
+                values.append(v)
+
+        # build SQL
+        col_list = ','.join(use_cols + (['created_at'] if include_created_now else []))
+        placeholders = ','.join(['%s'] * len(values) + (['NOW()'] if include_created_now else []))
+
+        try:
+            # try to RETURNING id when possible
+            if 'id' in cols:
+                sql = f"INSERT INTO command_logs ({col_list}) VALUES ({placeholders}) RETURNING id"
+                cur.execute(sql, values)
+                returned = cur.fetchone()
+                conn.commit()
+                return returned[0] if returned else None
+            else:
+                sql = f"INSERT INTO command_logs ({col_list}) VALUES ({placeholders})"
+                cur.execute(sql, values)
+                conn.commit()
+                return None
+        except Exception:
+            # fallback: try update by cmd_id if provided
+            conn.rollback()
+            if 'cmd_id' in meta and 'cmd_id' in cols and meta.get('cmd_id') is not None:
+                # prepare update for provided keys (excluding id)
+                update_cols = [c for c in use_cols if c != 'id' and c != 'cmd_id']
+                if update_cols:
+                    set_clause = ','.join([f"{c} = %s" for c in update_cols])
+                    update_vals = [Json(meta.get(c)) if c in ('params', 'result') else meta.get(c) for c in update_cols]
+                    update_vals.append(meta.get('cmd_id'))
+                    sql = f"UPDATE command_logs SET {set_clause} WHERE cmd_id = %s"
+                    cur.execute(sql, update_vals)
+                    conn.commit()
+                    return None
+            # otherwise re-raise
+            raise
+    finally:
+        conn.close()
+
+
+def update_command_status(cmd_id: str = None, device_id: str = None, status: str = None, result = None):
+    """
+    Update command_logs record by cmd_id if provided, otherwise update the most recent record for device_id
+    Returns number of rows updated.
+    """
+    if not cmd_id and not device_id:
+        return 0
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        # prefer update by cmd_id
+        if cmd_id:
+            # build set clause
+            sets = []
+            vals = []
+            if status is not None:
+                sets.append('status = %s')
+                vals.append(status)
+            if result is not None:
+                sets.append('result = %s')
+                # Always adapt result to JSON when writing into json/jsonb column
+                vals.append(Json(result))
+            if not sets:
+                return 0
+            vals.append(cmd_id)
+            sql = f"UPDATE command_logs SET {', '.join(sets)}, updated_at = NOW() WHERE cmd_id = %s"
+            cur.execute(sql, vals)
+            conn.commit()
+            return cur.rowcount
+
+        # else update most recent pending/sent record for device_id
+        # find id of most recent matching
+        cur.execute("SELECT id FROM command_logs WHERE device_id = %s AND status IN ('sent','pending') ORDER BY send_ts DESC NULLS LAST, created_at DESC NULLS LAST LIMIT 1", [device_id])
+        row = cur.fetchone()
+        if not row:
+            return 0
+        rec_id = row[0]
+        sets = []
+        vals = []
+        if status is not None:
+            sets.append('status = %s')
+            vals.append(status)
+        if result is not None:
+            sets.append('result = %s')
+            vals.append(Json(result))
+        if not sets:
+            return 0
+        vals.append(rec_id)
+        sql = f"UPDATE command_logs SET {', '.join(sets)}, updated_at = NOW() WHERE id = %s"
+        cur.execute(sql, vals)
+        conn.commit()
+        return cur.rowcount
     finally:
         conn.close()
 
@@ -438,6 +903,32 @@ def get_latest_failed_campaign_devices(campaign_id: str) -> list:
         conn.close()
 
 
+def ensure_campaign_tables(cur) -> None:
+    """
+    Create campaign-related base tables/indexes if they do not exist.
+    This keeps local/dev environments bootstrappable without manual SQL steps.
+    """
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS campaigns (
+            campaign_id TEXT PRIMARY KEY,
+            name TEXT,
+            creator_id TEXT,
+            status TEXT NOT NULL DEFAULT 'draft',
+            schedule_json JSONB NOT NULL,
+            target_device_groups JSONB,
+            start_at TIMESTAMPTZ,
+            end_at TIMESTAMPTZ,
+            version TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """
+    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_campaigns_updated_at ON campaigns(updated_at DESC)")
+
+
 def list_campaign_publish_logs(campaign_id: str, limit: int = 100, offset: int = 0) -> list:
     """
     List publish logs for a campaign, newest first.
@@ -464,6 +955,41 @@ def list_campaign_publish_logs(campaign_id: str, limit: int = 100, offset: int =
             [campaign_id, limit, offset],
         )
         return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def mark_campaign_retry_batch(campaign_id: str, source_batch_id: str) -> bool:
+    """
+    Mark a source publish batch as retried once.
+    Returns True if this is the first mark, False if already marked before.
+    """
+    if not source_batch_id:
+        return True
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS campaign_retry_batches (
+                id BIGSERIAL PRIMARY KEY,
+                campaign_id TEXT NOT NULL,
+                source_batch_id TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                UNIQUE (campaign_id, source_batch_id)
+            )
+            """
+        )
+        cur.execute(
+            """
+            INSERT INTO campaign_retry_batches (campaign_id, source_batch_id)
+            VALUES (%s, %s)
+            ON CONFLICT (campaign_id, source_batch_id) DO NOTHING
+            """,
+            [campaign_id, source_batch_id],
+        )
+        conn.commit()
+        return cur.rowcount > 0
     finally:
         conn.close()
 
