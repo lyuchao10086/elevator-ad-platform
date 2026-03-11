@@ -14,6 +14,7 @@ import (
 	"log" // 用于发送 HTTP 请求
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -39,12 +40,16 @@ type DeviceManager struct {
 	rdb         *redis.Client // 新增：Redis 客户端句柄
 }
 
-func (m *DeviceManager) NotifyPython(deviceID, reqID, snapshotURL string) {
-	callback := os.Getenv("CONTROL_PLANE_SNAPSHOT_CALLBACK")
-	if callback == "" {
-		// 确保这里的路径和 Python 的路由对齐
-		callback = "http://127.0.0.1:8000/api/v1/devices/remote/snapshot/callback"
+// 获取带默认值的环境变量辅助函数
+func getEnvWithDefault(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
 	}
+	return fallback
+}
+
+func (m *DeviceManager) NotifyPython(deviceID, reqID, snapshotURL string) {
+	callback := getEnvWithDefault("CONTROL_PLANE_SNAPSHOT_CALLBACK", "http://127.0.0.1:8000/api/v1/devices/remote/snapshot/callback")
 
 	body := map[string]string{
 		"device_id":    deviceID,
@@ -70,10 +75,21 @@ func (m *DeviceManager) NotifyPython(deviceID, reqID, snapshotURL string) {
 // NewDeviceManager 创建一个空的管理器
 func NewDeviceManager() *DeviceManager {
 	// --- 新增：初始化 Redis 连接 ---
+	// --- 从环境变量读取 Redis 配置 ---
+	redisAddr := getEnvWithDefault("REDIS_ADDR", "localhost:6379")
+	redisPassword := getEnvWithDefault("REDIS_PASSWORD", "")
+
+	redisDB := 0
+	if dbStr := os.Getenv("REDIS_DB"); dbStr != "" {
+		if dbInt, err := strconv.Atoi(dbStr); err == nil {
+			redisDB = dbInt
+		}
+	}
+
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379", // 你的 Redis 地址
-		Password: "",               // 如果没有密码留空
-		DB:       0,                // 默认数据库
+		Addr:     redisAddr,
+		Password: redisPassword,
+		DB:       redisDB,
 	})
 
 	// 测试一下 Redis 是否连接成功
@@ -95,26 +111,26 @@ func NewDeviceManager() *DeviceManager {
 // Register 改为存储 Session
 // 修改 Register：在注册成功后发送上线通知
 // Register 设备上线
+// manager.go
+
+// Register 现在接收三个参数：ID、连接对象、IP地址
 func (m *DeviceManager) Register(deviceID string, conn *websocket.Conn, clientIP string) {
 	m.lock.Lock()
+	// 虽然参数是分开传进来的，但我们存入 map 时依然使用 DeviceSession 结构体
+	// 这样方便后续管理（比如后续要查这个设备的 IP 或最后活跃时间）
 	m.connections[deviceID] = &DeviceSession{
 		Conn:       conn,
-		LastActive: time.Now(),
 		ClientIP:   clientIP,
+		LastActive: time.Now(),
 	}
 	m.lock.Unlock()
 
-	log.Printf("[Manager] 设备 %s 注册成功 ip=%s", deviceID, clientIP)
-
-	// --- 新增：写入 Redis (关键步骤) ---
-	// 逻辑：设置 key="device:online:123"，value="1"，过期时间=60秒
-	// 如果60秒内没有心跳续命，Redis 会自动删除这个 key，代表设备离线
-	err := m.rdb.Set(ctx, "device:online:"+deviceID, "1", 60*time.Second).Err()
-	if err != nil {
-		log.Printf("[Redis] 写入状态失败: %v", err)
+	// 写入 Redis 在线标记
+	if m.rdb != nil {
+		onlineKey := "device:online:" + deviceID
+		m.rdb.Set(ctx, onlineKey, "1", 60*time.Second)
+		log.Printf("[Manager] 设备 %s 上线成功 (来自 IP: %s)", deviceID, clientIP)
 	}
-
-	m.notifyPythonStatus(deviceID, "online")
 }
 
 // UpdateActiveTime 收到心跳或消息时调用
@@ -176,22 +192,16 @@ func (m *DeviceManager) KeepAliveManager() {
 //	}
 //
 // 修改 Unregister：在注销后发送下线通知
-// Unregister 设备离线
 func (m *DeviceManager) Unregister(deviceID string) {
 	m.lock.Lock()
-	if session, exists := m.connections[deviceID]; exists {
-		session.Conn.Close()
-		delete(m.connections, deviceID)
-		m.lock.Unlock()
+	delete(m.connections, deviceID)
+	m.lock.Unlock()
 
-		log.Printf("[Manager] 设备 %s 已注销", deviceID)
-
-		// --- 新增：立即从 Redis 删除状态 ---
+	// --- 【核心逻辑添加】 ---
+	// 设备断开连接时，立即删除在线标记
+	if m.rdb != nil {
 		m.rdb.Del(ctx, "device:online:"+deviceID)
-
-		m.notifyPythonStatus(deviceID, "offline")
-	} else {
-		m.lock.Unlock()
+		log.Printf("[Manager] 设备 %s 已从在线名单移除", deviceID)
 	}
 }
 
@@ -210,7 +220,8 @@ func (m *DeviceManager) GetConnection(deviceID string) (*websocket.Conn, bool) {
 // 核心函数：通知 Python 业务中心设备状态变更
 func (m *DeviceManager) notifyPythonStatus(deviceID string, status string) {
 
-	pythonWebhookURL := "http://127.0.0.1:8000/api/device/status"
+	// pythonWebhookURL := "http://10.12.58.85:8000/api/device/status"
+	pythonWebhookURL := getEnvWithDefault("CONTROL_PLANE_DEVICE_STATUS", "http://127.0.0.1:8000/api/device/status")
 	payload := map[string]interface{}{
 		"device_id":  deviceID,
 		"status":     status,
@@ -239,11 +250,7 @@ func (m *DeviceManager) notifyPythonStatus(deviceID string, status string) {
 
 // NotifyCommandCallback 向 control-plane 的 /commands/callback 发回指令执行结果
 func (m *DeviceManager) NotifyCommandCallback(deviceID, cmdID, status, info string) {
-	callback := os.Getenv("CONTROL_PLANE_COMMAND_CALLBACK")
-	if callback == "" {
-		callback = "http://127.0.0.1:8000/api/v1/commands/callback"
-	}
-
+	callback := getEnvWithDefault("CONTROL_PLANE_COMMAND_CALLBACK", "http://127.0.0.1:8000/api/v1/commands/callback")
 	payload := map[string]string{
 		"device_id": deviceID,
 		"cmd_id":    cmdID,
@@ -266,11 +273,7 @@ func (m *DeviceManager) NotifyCommandCallback(deviceID, cmdID, status, info stri
 
 // 通知python业务中心截图已生成
 func (h *Handler) notifyPython(deviceID, reqID, snapshotURL string) {
-	callback := os.Getenv("CONTROL_PLANE_SNAPSHOT_CALLBACK")
-	if callback == "" {
-		// callback = "http://127.0.0.1:8000/api/v1/devices/snapshot/callback"
-		callback = "http://127.0.0.1:8000/api/v1/devices/remote/snapshot/callback"
-	}
+	callback := getEnvWithDefault("CONTROL_PLANE_SNAPSHOT_CALLBACK", "http://127.0.0.1:8000/api/v1/devices/remote/snapshot/callback")
 	// callback = "http://127.0.0.1:8000/api/v1/devices/remote/snapshot/callback"
 	body := map[string]string{
 		"device_id":    deviceID,

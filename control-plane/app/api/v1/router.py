@@ -24,9 +24,10 @@ def get_summary():
         # 优先使用 Redis 统计：与 Go 网关写入的 key 保持一致 (device:online:<device_id>)
         try:
             rdb = redis.Redis(
-                host=getattr(settings, 'redis_host', '127.0.0.1'),
+                host=getattr(settings, 'redis_host', '10.12.58.42'),
                 port=getattr(settings, 'redis_port', 6379),
                 db=getattr(settings, 'redis_db', 0),
+                password='123456',
                 decode_responses=True,
             )
             # keys 可能在大规模环境下性能欠佳；此处为简单实现，若需优化可改为 scan/schildren/统计集合
@@ -34,8 +35,10 @@ def get_summary():
             online = int(len(online_keys))
             # 尝试使用 registered_devices 集合作为设备总数的来源（register 接口会维护该集合）
             try:
-                registered = int(rdb.scard('registered_devices') or 0)
-                offline = max(0, registered - online)
+                # registered = int(rdb.scard('registered_devices') or 0)
+                # offline = max(0, registered - online)
+                total = db_service.count_devices()
+                offline = max(0, total - online)
             except Exception:
                 # 若 Redis 中没有 registered_devices，则回退到 DB 的统计
                 counts = db_service.count_devices_status()

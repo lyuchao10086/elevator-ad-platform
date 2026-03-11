@@ -11,11 +11,11 @@ import (
 
 func main() {
 	//加载环境配置
-	err := godotenv.Load(".env")
+	err := godotenv.Load("../configs/.env.example") //改成你自己的环境变量文件路径
 
 	// 如果上面的失败了，尝试往上一级找 (针对在 cmd 目录下运行的情况)
 	if err != nil {
-		err = godotenv.Load("../.env")
+		err = godotenv.Load("configs/.env.example")
 	}
 
 	if err != nil {
