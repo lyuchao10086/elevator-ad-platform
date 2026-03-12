@@ -8,7 +8,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -153,7 +152,7 @@ func (h *Handler) DispatchMessage(deviceID string, conn *websocket.Conn) {
 
 		case "log":
 			// 处理播放日志上报
-			h.handleLogReport(msg.Payload)
+			h.handleLogReport(conn, msg.Payload)
 
 		case "snapshot_response":
 			// 处理截图上传逻辑
@@ -366,12 +365,13 @@ func (h *Handler) handleSnapshot(msg DeviceMessage) {
 			ossURL = ""
 		} else {
 			//上传成功
-			ossURL = fmt.Sprintf(
-				"https://%s.%s/%s",
-				os.Getenv("OSS_BUCKET"),
-				os.Getenv("OSS_ENDPOINT"),
-				objectKey,
-			)
+			// 使用 SDK 生成签名 URL (过期时间为 1 小时)
+			signedURL, err := h.bucket.SignURL(objectKey, oss.HTTPGet, 3600)
+			if err != nil {
+				log.Printf("[OSS] 生成签名 URL 失败: %v", err)
+				return
+			}
+			ossURL = signedURL
 			log.Printf(
 				"[snapshot] OSS 上传成功 device=%s req=%s url=%s",
 				msg.DeviceID,

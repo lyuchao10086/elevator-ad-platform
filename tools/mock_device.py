@@ -53,7 +53,7 @@ def simulate_elevator(device_id, token): # 增加 token 参数
     import os
     def on_message(ws, message):
         data = json.loads(message)
-        
+       
         # 1. 过滤心跳日志，保持终端干净
         if data.get("type") == "pong":
             return
@@ -63,43 +63,44 @@ def simulate_elevator(device_id, token): # 增加 token 参数
         # --- 核心改动：兼容性判断 ---
         # 逻辑 A:  snapshot_request
         # 逻辑 B:  command + SNAPSHOT
-        is_old_style = (data.get("type") == "snapshot_request")
-        is_new_style = (data.get("type") == "command" and data.get("payload") == "SNAPSHOT")
+        # 适配 Go Handler 的 HandleCommand 下发的格式
+        is_snapshot = (data.get("type") == "command" and data.get("payload") == "SNAPSHOT") or \
+                  (data.get("type") == "snapshot_request")
 
         # 逻辑 C: 通用 command（重启、设置音量、插播等）
-        is_command = (data.get("type") == "command")
+        is_command = (data.get("type") == "command") and not is_snapshot
 
-        if is_old_style or is_new_style:
-            # 统一提取 req_id
-            req_id = data.get("req_id", "unknown") 
-            print(f"[{device_id}] 📸 正在处理截图请求 (模式: {'旧' if is_old_style else '新'}), req_id={req_id}")
+        # --- 处理截图请求 ---
+        if is_snapshot:
+            # 【关键修改 1】提取 ID。Python 发给 Go 的是 cmd_id，Go 转发给设备也是 cmd_id
+            # 必须原样带回，Python 才能匹配到 _waiters 里的请求
+            req_id = data.get("cmd_id") or data.get("req_id") or "unknown"
             
-            # 读取本地图片逻辑（保持不变）
+            print(f"[{device_id}] 📸 正在处理截图请求, req_id={req_id}")
+            
+            # 读取本地图片
             try:
+                # 建议检查路径是否存在
                 with open(r"E:\repository\elevator-ad-platform\data\test_snapshot.jpg", "rb") as f:
                     img_bytes = f.read()
                 img_b64 = base64.b64encode(img_bytes).decode("utf-8")
-            except FileNotFoundError:
-                img_b64 = "BASE64_MOCK_DATA" 
-                print(f"[{device_id}] 警告: 未找到pg")
+            except Exception as e:
+                # 如果没图，发一个 1x1 像素的红点 Mock 数据，保证链路不卡死
+                img_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+                print(f"[{device_id}] 警告: 读取图片失败 {e}，使用 Mock 数据")
 
-            # --- 关键点： test_snapshot.j构造回复消息 ---
-            # 为了兼容你的 Go 后端 handler.go，必须使用 snapshot_response 且数据放在 payload 里
+            # 【关键修改 2】构造回复消息格式
+            # 必须匹配 handler.go 里的 snapshot_response
             snapshot_msg = {
-                "type": "snapshot_response", # 匹配 handler.go 第 118 行的 case
+                "type": "snapshot_response",
                 "device_id": device_id,
-                "req_id": req_id,
+                "req_id": req_id,  # 这里回传 req_id，Go 会把它传给 NotifyPython
                 "ts": int(time.time()),
-                "payload": {                 # 匹配 handler.go 第 150-155 行的解析结构
+                "payload": {
                     "format": "jpg",
-                    "quality": 80,
-                    "resolution": "1920x1080",
-                    "data": img_b64          # 图片数据放在这里
+                    "data": img_b64 # Go 的 handler 会解开这个 data 字段
                 }
             }
-            
-            # 如果别人原来的逻辑还需要 snapshot_response 以外的类型，可以在这里加判断
-            # 但根据你提供的 handler.go，Go 网关只认 snapshot_response
             
             ws.send(json.dumps(snapshot_msg))
             print(f"[{device_id}] ✅ 已上传截图回复 (req_id: {req_id})")
