@@ -13,11 +13,12 @@ NetworkClient::~NetworkClient() {
 
 void NetworkClient::startGatewayConnection(const std::string& wsUrl, const std::string& deviceId, const std::string& token, 
                                            std::function<json(int)> logProvider, 
-                                           std::function<void(const std::vector<std::string>&)> onSuccess) {
+                                           std::function<void(const std::vector<std::string>&)> onSuccess,
+                                           std::function<void(const json&, std::function<void(const json&)>)> onMessage) {
     if (wsRunning_) return;
     
     wsRunning_ = true;
-    wsThread_ = std::thread(&NetworkClient::wsLoop, this, wsUrl, deviceId, token, logProvider, onSuccess);
+    wsThread_ = std::thread(&NetworkClient::wsLoop, this, wsUrl, deviceId, token, logProvider, onSuccess, onMessage);
     std::cout << "[NetworkClient] 网关连接线程已启动 (URL: " << wsUrl << ")" << std::endl;
 }
 
@@ -33,7 +34,8 @@ void NetworkClient::stopGatewayConnection() {
 
 void NetworkClient::wsLoop(std::string wsUrl, std::string deviceId, std::string token,
                            std::function<json(int)> logProvider, 
-                           std::function<void(const std::vector<std::string>&)> onSuccess) {
+                           std::function<void(const std::vector<std::string>&)> onSuccess,
+                           std::function<void(const json&, std::function<void(const json&)>)> onMessage) {
     while (wsRunning_) {
         // 1. 构造完整 URL (带鉴权参数)
         // 简单判断是否已有 query
@@ -96,7 +98,17 @@ void NetworkClient::wsLoop(std::string wsUrl, std::string deviceId, std::string 
                     if (res == httplib::ws::ReadResult::Text || res == httplib::ws::ReadResult::Binary) {
                         // 收到消息
                         std::cout << "[NetworkClient] 收到网关消息: " << msg << std::endl;
-                        // TODO: 处理业务消息 (这里需要一个回调机制将消息传递给 EdgeManager)
+                        try {
+                            json j = json::parse(msg);
+                            if (onMessage) {
+                                auto sendFunc = [&](const json& reply){
+                                    ws.send(reply.dump());
+                                };
+                                onMessage(j, sendFunc);
+                            }
+                        } catch (const std::exception& e) {
+                            std::cerr << "[NetworkClient] 解析消息失败: " << e.what() << std::endl;
+                        }
                         
                     } else {
                         // 连接关闭或错误

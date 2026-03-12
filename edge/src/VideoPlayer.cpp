@@ -140,8 +140,12 @@ struct VideoPlayer::Impl {
             return;
         }
         
-        // 设置渲染驱动为 OpenGL，解决 macOS Metal 驱动可能的绿屏和 AGX 警告问题
+        // 选择渲染驱动：Windows 用 Direct3D，其他平台用 OpenGL
+#ifdef _WIN32
+        SDL_SetHint(SDL_HINT_RENDER_DRIVER, "direct3d");
+#else
         SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
+#endif
 
         // 确保SDL已初始化
         if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -246,7 +250,7 @@ struct VideoPlayer::Impl {
         while (!should_stop) {
             // 检查是否达到目标时长
             // 如果外部设定了 duration_ms，则强制在此处截断
-            if (target_duration_ms > 0) {
+            if (is_image && target_duration_ms > 0) {
                 auto now = std::chrono::steady_clock::now();
                 int64_t elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - playback_start_time).count();
                 if (elapsed >= target_duration_ms) {
@@ -501,7 +505,7 @@ void VideoPlayer::CloseWindow() {
 bool VideoPlayer::Load(const std::string& filepath, int64_t duration_ms) {
     pImpl->CleanupDecoder(); // 只清理解码器资源，保留SDL窗口
     pImpl->should_stop = false;
-    pImpl->target_duration_ms = duration_ms;
+    pImpl->target_duration_ms = 0;
     pImpl->playback_start_time = std::chrono::steady_clock::now();
 
     std::cout << "加载媒体: " << filepath << std::endl;
@@ -574,6 +578,9 @@ bool VideoPlayer::Load(const std::string& filepath, int64_t duration_ms) {
                 std::cout << "检测到图片格式 (扩展名)" << std::endl;
             }
         }
+    }
+    if (pImpl->is_image) {
+        pImpl->target_duration_ms = duration_ms > 0 ? duration_ms : 3000;
     }
 
     std::cout << "媒体加载成功: " << pImpl->width << "x" << pImpl->height 
@@ -648,4 +655,27 @@ void VideoPlayer::SetWindowTitle(const std::string& title) {
 
 void VideoPlayer::SetFrameCallback(FrameCallback callback) {
     pImpl->frame_callback = callback;
+}
+
+bool VideoPlayer::CaptureSnapshotBMP(const std::string& filepath) {
+    if (!pImpl->renderer || !pImpl->window) {
+        return false;
+    }
+    int w = 0, h = 0;
+    SDL_GetRendererOutputSize(pImpl->renderer, &w, &h);
+    if (w <= 0 || h <= 0) {
+        w = pImpl->width;
+        h = pImpl->height;
+    }
+    SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_ARGB8888);
+    if (!surface) {
+        return false;
+    }
+    if (SDL_RenderReadPixels(pImpl->renderer, nullptr, surface->format->format, surface->pixels, surface->pitch) != 0) {
+        SDL_FreeSurface(surface);
+        return false;
+    }
+    int r = SDL_SaveBMP(surface, filepath.c_str());
+    SDL_FreeSurface(surface);
+    return r == 0;
 }

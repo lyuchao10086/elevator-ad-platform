@@ -216,6 +216,10 @@ private:
     std::unique_ptr<Database> db_;  ///< 数据库实例指针
     std::unique_ptr<VideoPlayer> player_; ///< 视频播放器实例指针
     std::unique_ptr<NetworkClient> network_; ///< 网络客户端实例指针
+    int current_volume_ = 60;
+    bool current_mute_ = false;
+    std::atomic<bool> should_exit_{false};
+    std::atomic<bool> should_soft_reboot_{false};
 
     // 轮播索引 (用于 getNextAsset 轮询 timeslot 中的列表)
     size_t current_playlist_index_ = 0;

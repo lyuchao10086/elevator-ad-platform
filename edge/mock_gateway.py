@@ -50,15 +50,9 @@ async def handler(websocket):
         logging.info(f"Connection closed for {client_addr}")
 
 async def main():
-    stop = asyncio.Future()
-    loop = asyncio.get_running_loop()
-    # 优雅退出
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, stop.set_result, None)
-
     logging.info("Starting Mock Gateway Server on ws://0.0.0.0:8080")
     async with websockets.serve(handler, "0.0.0.0", 8080, ping_interval=None):
-        await stop # Run until signal received
+        await asyncio.Future()
 
 if __name__ == "__main__":
     try:

@@ -12,10 +12,57 @@
 #include <chrono> // 增加 chrono 头文件
 #include <filesystem>
 #include <random> // 增加 random 头文件
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <winsock2.h>
+#include <Ws2tcpip.h>
+#pragma comment(lib, "Ws2_32.lib")
+#ifdef CreateWindow
+#undef CreateWindow
+#endif
+#ifdef ERROR
+#undef ERROR
+#endif
+#ifdef WARNING
+#undef WARNING
+#endif
+#ifdef INFO
+#undef INFO
+#endif
+#else
 #include <ifaddrs.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#endif
 
+static std::string b64encode(const std::vector<uint8_t>& in) {
+    static const char* tbl = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    size_t i = 0;
+    while (i + 2 < in.size()) {
+        uint32_t n = (in[i] << 16) | (in[i + 1] << 8) | in[i + 2];
+        out.push_back(tbl[(n >> 18) & 63]);
+        out.push_back(tbl[(n >> 12) & 63]);
+        out.push_back(tbl[(n >> 6) & 63]);
+        out.push_back(tbl[n & 63]);
+        i += 3;
+    }
+    if (i + 1 == in.size()) {
+        uint32_t n = (in[i] << 16);
+        out.push_back(tbl[(n >> 18) & 63]);
+        out.push_back(tbl[(n >> 12) & 63]);
+        out.push_back('=');
+        out.push_back('=');
+    } else if (i + 2 == in.size()) {
+        uint32_t n = (in[i] << 16) | (in[i + 1] << 8);
+        out.push_back(tbl[(n >> 18) & 63]);
+        out.push_back(tbl[(n >> 12) & 63]);
+        out.push_back(tbl[(n >> 6) & 63]);
+        out.push_back('=');
+    }
+    return out;
+}
 EdgeManager::EdgeManager() : is_initialized_(false) {
 }
 
@@ -95,12 +142,62 @@ bool EdgeManager::init(const std::string& configPath) {
         // 启动网关连接
         // 建立 WebSocket 长连接，用于接收服务端的实时指令
         if (!config_.gateway_ws_url.empty() && !config_.device_id.empty()) {
-            network_->startGatewayConnection(config_.gateway_ws_url, config_.device_id, config_.token,
-                [this](int limit) {
-                    return this->getLogs(limit);
-                },
-                [this](const std::vector<std::string>& logIds) {
-                    this->updateLogStatus(logIds, 1);
+            network_->startGatewayConnection(
+                config_.gateway_ws_url,
+                config_.device_id,
+                config_.token,
+                [this](int limit) { return this->getLogs(limit); },
+                [this](const std::vector<std::string>& logIds) { this->updateLogStatus(logIds, 1); },
+                [this](const json& msg, std::function<void(const json&)> send) {
+                    bool is_snapshot = (msg.contains("type") && msg["type"] == "snapshot_request") ||
+                        (msg.contains("type") && msg["type"] == "command" && msg.contains("payload") && msg["payload"] == "SNAPSHOT");
+                    bool is_command = (msg.contains("type") && msg["type"] == "command") && !is_snapshot;
+                    if (is_snapshot) {
+                        std::string req_id = msg.value("cmd_id", "");
+                        if (req_id.empty()) req_id = msg.value("req_id", "");
+                        std::string path = config_.resources_dir + "snapshot.bmp";
+                        bool ok = false;
+                        if (player_) {
+                            ok = player_->CaptureSnapshotBMP(path);
+                        }
+                        std::vector<uint8_t> bytes;
+                        if (ok) {
+                            std::ifstream f(path, std::ios::binary);
+                            bytes = std::vector<uint8_t>(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+                        }
+                        std::string b64 = bytes.empty() ? "" : b64encode(bytes);
+                        json snapshot_msg;
+                        snapshot_msg["type"] = "snapshot_response";
+                        snapshot_msg["device_id"] = config_.device_id;
+                        snapshot_msg["req_id"] = req_id;
+                        snapshot_msg["ts"] = static_cast<long long>(std::time(nullptr));
+                        snapshot_msg["payload"] = { {"format","bmp"},{"data", b64} };
+                        send(snapshot_msg);
+                    } else if (is_command) {
+                        std::string cmd = msg.value("payload", "");
+                        std::string cmd_id = msg.value("cmd_id", "");
+                        json data = msg.value("data", json::object());
+                        std::string result = "ok";
+                        if (cmd == "SET_VOLUME") {
+                            int vol = data.value("volume", current_volume_);
+                            bool mute = data.value("mute", current_mute_);
+                            current_volume_ = vol;
+                            current_mute_ = mute;
+                            result = std::string("set_volume:") + std::to_string(vol) + "|mute:" + (mute ? "1" : "0");
+                        } else if (cmd == "REBOOT") {
+                            result = "reboot_ok";
+                            should_soft_reboot_ = true;
+                        } else {
+                            result = cmd + "_ok";
+                        }
+                        json resp;
+                        resp["type"] = "command_response";
+                        resp["device_id"] = config_.device_id;
+                        resp["req_id"] = msg.value("req_id", "");
+                        resp["ts"] = static_cast<long long>(std::time(nullptr));
+                        resp["payload"] = { {"cmd_id", cmd_id}, {"status","success"}, {"result", result} };
+                        send(resp);
+                    }
                 }
             );
         }
@@ -145,6 +242,91 @@ void EdgeManager::run() {
     // 3. 在播放过程中持续调用 player_->Update (渲染画面)
     // 4. 监控窗口状态，处理意外关闭
     while (true) {
+        if (should_soft_reboot_) {
+            printInfo(LogLevel::INFO, "执行软重启：断开网关连接，关闭播放器，再次上线");
+            try {
+                if (network_) {
+                    network_->stopGatewayConnection();
+                }
+                if (player_) {
+                    player_->Stop();
+                    player_->CloseWindow();
+                }
+                SDL_Quit();
+            } catch (...) {}
+            if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER) < 0) {
+                printInfo(LogLevel::ERROR, "软重启后无法初始化 SDL: " + std::string(SDL_GetError()));
+            } else {
+                player_->CreateWindow("Edge Player", 1280, 720);
+                if (!config_.gateway_ws_url.empty() && !config_.device_id.empty()) {
+                    if (!network_) {
+                        network_ = std::make_unique<NetworkClient>(config_.gateway_ws_url);
+                    }
+                    network_->startGatewayConnection(
+                        config_.gateway_ws_url,
+                        config_.device_id,
+                        config_.token,
+                        [this](int limit) { return this->getLogs(limit); },
+                        [this](const std::vector<std::string>& logIds) { this->updateLogStatus(logIds, 1); },
+                        [this](const json& msg, std::function<void(const json&)> send) {
+                            bool is_snapshot = (msg.contains("type") && msg["type"] == "snapshot_request") ||
+                                (msg.contains("type") && msg["type"] == "command" && msg.contains("payload") && msg["payload"] == "SNAPSHOT");
+                            bool is_command = (msg.contains("type") && msg["type"] == "command") && !is_snapshot;
+                            if (is_snapshot) {
+                                std::string req_id = msg.value("cmd_id", "");
+                                if (req_id.empty()) req_id = msg.value("req_id", "");
+                                std::string path = config_.resources_dir + "snapshot.bmp";
+                                bool ok = false;
+                                if (player_) {
+                                    ok = player_->CaptureSnapshotBMP(path);
+                                }
+                                std::vector<uint8_t> bytes;
+                                if (ok) {
+                                    std::ifstream f(path, std::ios::binary);
+                                    bytes = std::vector<uint8_t>(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+                                }
+                                std::string b64 = bytes.empty() ? "" : b64encode(bytes);
+                                json snapshot_msg;
+                                snapshot_msg["type"] = "snapshot_response";
+                                snapshot_msg["device_id"] = config_.device_id;
+                                snapshot_msg["req_id"] = req_id;
+                                snapshot_msg["ts"] = static_cast<long long>(std::time(nullptr));
+                                snapshot_msg["payload"] = { {"format","bmp"},{"data", b64} };
+                                send(snapshot_msg);
+                            } else if (is_command) {
+                                std::string cmd = msg.value("payload", "");
+                                std::string cmd_id = msg.value("cmd_id", "");
+                                json data = msg.value("data", json::object());
+                                std::string result = "ok";
+                                if (cmd == "SET_VOLUME") {
+                                    int vol = data.value("volume", current_volume_);
+                                    bool mute = data.value("mute", current_mute_);
+                                    current_volume_ = vol;
+                                    current_mute_ = mute;
+                                    result = std::string("set_volume:") + std::to_string(vol) + "|mute:" + (mute ? "1" : "0");
+                                } else if (cmd == "REBOOT") {
+                                    result = "reboot_ok";
+                                    should_soft_reboot_ = true;
+                                } else {
+                                    result = cmd + "_ok";
+                                }
+                                json resp;
+                                resp["type"] = "command_response";
+                                resp["device_id"] = config_.device_id;
+                                resp["req_id"] = msg.value("req_id", "");
+                                resp["ts"] = static_cast<long long>(std::time(nullptr));
+                                resp["payload"] = { {"cmd_id", cmd_id}, {"status","success"}, {"result", result} };
+                                send(resp);
+                            }
+                        }
+                    );
+                }
+            }
+            should_soft_reboot_ = false;
+        }
+        if (should_exit_) {
+            goto end_loop;
+        }
         // 检查是否有退出信号 (暂时没有实现信号处理，这里是一个死循环)
         // 实际项目中应该有退出机制
 
@@ -184,7 +366,11 @@ void EdgeManager::run() {
                         // 如果用户手动关闭了窗口，这里需要感知并退出
                         if (!player_->IsWindowOpen()) {
                              player_->Stop();
-                             printInfo(LogLevel::INFO, "检测到窗口关闭 (播放中)，退出程序");
+                             printInfo(LogLevel::INFO, "检测到窗口关闭 (播放中)，准备退出");
+                             goto end_loop;
+                        }
+                        if (should_exit_) {
+                             player_->Stop();
                              goto end_loop;
                         }
                     }
@@ -195,7 +381,7 @@ void EdgeManager::run() {
             
             // 再次检查窗口状态 (防止在 Load 失败或 Play 刚结束的瞬间关闭)
             if (!player_->IsWindowOpen()) {
-                printInfo(LogLevel::INFO, "检测到窗口关闭 (播放间隙)，退出程序");
+                printInfo(LogLevel::INFO, "检测到窗口关闭 (播放间隙)，准备退出");
                 goto end_loop;
             }
             
@@ -207,8 +393,7 @@ void EdgeManager::run() {
             printInfo(LogLevel::WARNING, "当前没有可播放的排期，休眠 5秒...");
             
             if (!waitForPlaybackOrStop()) {
-                printInfo(LogLevel::INFO, "休眠期间收到退出信号");
-                goto end_loop;
+                printInfo(LogLevel::INFO, "休眠期间收到退出信号，但保持程序继续运行");
             }
         }
 
@@ -216,6 +401,8 @@ void EdgeManager::run() {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
+                printInfo(LogLevel::INFO, "收到退出事件，准备退出");
+                should_exit_ = true;
                 goto end_loop;
             }
         }
@@ -226,7 +413,6 @@ end_loop:
     
     player_->CloseWindow();
     
-    // 停止网络客户端
     if (network_) {
         network_->stopGatewayConnection();
     }
@@ -598,6 +784,35 @@ void EdgeManager::updateLogStatus(const std::vector<std::string>& logIds, int st
 
 // 辅助函数：获取本机 IP
 std::string getLocalIPAddress() {
+#ifdef _WIN32
+    std::string ipAddress = "127.0.0.1";
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        return ipAddress;
+    }
+    char host[256] = {0};
+    if (gethostname(host, sizeof(host)) == 0) {
+        addrinfo hints = {};
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+        addrinfo* res = nullptr;
+        if (getaddrinfo(host, nullptr, &hints, &res) == 0) {
+            for (addrinfo* p = res; p != nullptr; p = p->ai_next) {
+                sockaddr_in* addr = reinterpret_cast<sockaddr_in*>(p->ai_addr);
+                char ipStr[INET_ADDRSTRLEN] = {0};
+                inet_ntop(AF_INET, &addr->sin_addr, ipStr, INET_ADDRSTRLEN);
+                std::string ip(ipStr);
+                if (ip != "127.0.0.1") {
+                    ipAddress = ip;
+                    break;
+                }
+            }
+            freeaddrinfo(res);
+        }
+    }
+    WSACleanup();
+    return ipAddress;
+#else
     std::string ipAddress = "127.0.0.1";
     struct ifaddrs *interfaces = nullptr;
     
@@ -618,6 +833,7 @@ std::string getLocalIPAddress() {
         freeifaddrs(interfaces);
     }
     return ipAddress;
+#endif
 }
 
 void EdgeManager::log(const std::string& adId, const std::string& adFileName, long long startTime, long long endTime, int durationMs, int statusCode, const std::string& statusMsg) {

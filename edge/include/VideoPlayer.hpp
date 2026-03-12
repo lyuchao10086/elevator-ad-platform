@@ -191,6 +191,8 @@ public:
      */
     void SetFrameCallback(FrameCallback callback);
 
+    bool CaptureSnapshotBMP(const std::string& filepath);
+
 private:
     // PIMPL 模式：前置声明实现结构体
     struct Impl;

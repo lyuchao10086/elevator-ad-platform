@@ -40,13 +40,29 @@
 
 ## 编译与运行
 
-### 1. 编译项目
+### 1. 编译项目（Linux/macOS）
 
 ```bash
 mkdir build
 cd build
 cmake ..
 make
+```
+
+### 1b. 编译项目（Windows，使用 vcpkg）
+
+- 依赖安装（已安装可跳过）
+  - vcpkg: D:\vcpkg
+  - 安装库: ffmpeg、sdl2、sqlite3、pkgconf、nlohmann-json
+- 生成与编译
+
+```powershell
+cd d:\D huancun\elevator-ad-platform\edge
+cmake -S . -B winbuild `
+  -DCMAKE_TOOLCHAIN_FILE=D:\vcpkg\scripts\buildsystems\vcpkg.cmake `
+  -DCMAKE_PREFIX_PATH=D:\vcpkg\installed\x64-windows `
+  -DPKG_CONFIG_EXECUTABLE=D:\vcpkg\installed\x64-windows\tools\pkgconf\pkgconf.exe
+cmake --build winbuild --config Release
 ```
 
 ### 2. 准备资源
@@ -69,11 +85,23 @@ resources/
 python3 mock_gateway.py
 ```
 
-### 4. 运行播放器
+### 4. 运行播放器（Linux/macOS）
 
 ```bash
 ./build/edge
 ```
+
+### 4b. 运行播放器（Windows）
+
+```powershell
+cd d:\D huancun\elevator-ad-platform\edge
+chcp 65001
+.\winbuild\Release\edge.exe .\config.json
+```
+
+提示：
+- 若中文日志有乱码：执行 chcp 65001（UTF-8）
+- 若窗口无法创建：Windows 默认渲染驱动为 Direct3D（代码已设置），请确保 GPU/驱动可用
 
 ## 模块设计
 
@@ -148,8 +176,28 @@ python3 mock_gateway.py
 2. **日志流程**: `EdgeManager::recordPlayEnd()` -> `Database::execute()` (写入 log 表) -> `NetworkClient` (后台线程读取 log 表并上报) -> `EdgeManager::updateLogStatus()` (更新 uploaded=1).
 
 ### 网络接口 (WebSocket)
-- **心跳包**: `{"id": "DEVICE_001", "token": "..."}`
-- **日志包**: `{"id": "DEVICE_001", "token": "...", "logs": [...]}`
+- 设备连接地址：`ws://<gateway-host>:<port>/ws?device_id=<ID>&token=<TOKEN>`
+- 心跳包：`{"type": "heartbeat", "payload": "ping"}`
+- 日志包：`{"type": "log", "payload": [ ... ]}`
+- 指令下发与回包（兼容两种风格）：
+  - 截图下发（二选一）：
+    - `{"type":"snapshot_request","req_id":"<uuid>"}` 或
+    - `{"type":"command","payload":"SNAPSHOT","cmd_id":"<uuid>"}`
+  - 截图回包：
+    - `{"type":"snapshot_response","device_id":"<id>","req_id":"<uuid>","ts":<sec>,"payload":{"format":"bmp|jpg","data":"<base64>"}}`
+  - 通用命令下发（示例：调整音量）：
+    - `{"type":"command","payload":"SET_VOLUME","cmd_id":"<uuid>","data":{"volume":60,"mute":false}}`
+  - 通用命令回包：
+    - `{"type":"command_response","device_id":"<id>","req_id":"<uuid>","ts":<sec>,"payload":{"cmd_id":"<uuid>","status":"success","result":"set_volume:60|mute:0"}}`
+  - 重启设备（软重启）：
+    - 下发：`{"type":"command","payload":"REBOOT","cmd_id":"<uuid>"}`
+    - 回包：`{"type":"command_response", ... "result":"reboot_ok"}`
+    - 行为：设备断开网关、关闭窗口、重新初始化并再次上线（不退出进程）
+
+### Python 辅助联调
+- HTTP 触发远程截图（Go 网关提供）：`GET /api/v1/devices/remote/{device_id}/snapshot`
+- 通用命令下发（Go 网关提供）：`POST /api/send`，Body: `{"device_id": "...", "command": "SET_VOLUME", "data": {...}}`
+- 回调示例与触发脚本参考：[tools/push_to_gateway.py](../tools/push_to_gateway.py)
 
 ## 配置说明
 
@@ -166,3 +214,24 @@ python3 mock_gateway.py
     "gateway_ws_url": "ws://127.0.0.1:8080/"
 }
 ```
+
+## 播放引擎快速上手（给引擎同学）
+- 渲染线程模型
+  - 解码线程：`VideoPlayer::DecodeThreadFunc()` 负责生产 YUV 帧（队列 MAX=10）
+  - 渲染在主线程：循环调用 `VideoPlayer::Update()`，处理 SDL 事件并刷新纹理
+- 媒体加载与播放
+  - `Load(path, duration_ms)`：初始化解码器；视频忽略 duration_ms，图片尊重（默认 3000ms）
+  - `Play()`：创建/复用 SDL 窗口并启动解码线程
+  - `Update()`：`SDL_UpdateYUVTexture + SDL_RenderPresent`，含简单帧率控制
+- 渲染驱动选择
+  - Windows：`SDL_HINT_RENDER_DRIVER=direct3d`
+  - 其他平台：`opengl`
+- 截图接口
+  - `CaptureSnapshotBMP(filepath)`：读取 Renderer 输出并保存 BMP，供远程截图回包
+- 事件与退出
+  - SDL_QUIT：EdgeManager 捕获后优雅退出（或软重启）
+  - REBOOT 指令：软重启，不退出进程
+- 常见问题
+  - 中文日志乱码：PowerShell 执行 `chcp 65001`
+  - 窗口一闪而过：检查资源路径与 `config.json`；确保在 `edge` 目录运行或显式传入配置路径
+  - OpenGL 渲染异常（Windows）：已切换为 Direct3D，若仍异常请确认显卡驱动

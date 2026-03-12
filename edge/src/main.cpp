@@ -3,10 +3,17 @@
 #include <filesystem>
 #include <fstream>
 #include "EdgeManager.hpp"
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace fs = std::filesystem;
 
 int main(int argc, char* argv[]) {
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+#endif
     try {
         // 1. 确定配置文件路径
         std::string configPath = "config.json";

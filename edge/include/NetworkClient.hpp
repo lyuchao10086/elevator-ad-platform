@@ -43,7 +43,8 @@ public:
      */
     void startGatewayConnection(const std::string& wsUrl, const std::string& deviceId, const std::string& token, 
                                 std::function<json(int)> logProvider, 
-                                std::function<void(const std::vector<std::string>&)> onSuccess);
+                                std::function<void(const std::vector<std::string>&)> onSuccess,
+                                std::function<void(const json&, std::function<void(const json&)>)> onMessage);
 
     /**
      * @brief 停止网关连接
@@ -59,7 +60,8 @@ private:
     // WebSocket 网关维护循环
     void wsLoop(std::string wsUrl, std::string deviceId, std::string token,
                 std::function<json(int)> logProvider, 
-                std::function<void(const std::vector<std::string>&)> onSuccess);
+                std::function<void(const std::vector<std::string>&)> onSuccess,
+                std::function<void(const json&, std::function<void(const json&)>)> onMessage);
 
     // 发送心跳
     bool sendHeartbeat(void* wsClient, const std::string& deviceId, const std::string& token);
