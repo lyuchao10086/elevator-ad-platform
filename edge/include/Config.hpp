@@ -14,7 +14,6 @@ struct Config {
     std::string resources_dir;      // 资源文件根目录 (e.g., "resources/")
     std::string ads_config_path;    // 广告素材配置文件路径 (e.g., "resources/Ads.json")
     std::string schedule_config_path; // 排期策略配置文件路径 (e.g., "resources/Schedule.json")
-    std::string cloud_api_url;      // 云端上报接口地址
     std::string gateway_ws_url;     // 网关 WebSocket 地址 (e.g. ws://10.12.58.85:8080/ws)
     std::string device_id;          // 设备唯一标识符
     std::string token;              // 认证 Token
@@ -23,7 +22,7 @@ struct Config {
     Config() : log_level(1) {}
 
     // 支持 JSON 序列化/反序列化
-    NLOHMANN_DEFINE_TYPE_INTRUSIVE(Config, db_path, resources_dir, ads_config_path, schedule_config_path, cloud_api_url, gateway_ws_url, device_id, token, log_level)
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(Config, db_path, resources_dir, ads_config_path, schedule_config_path, gateway_ws_url, device_id, token, log_level)
 };
 
 #endif // CONFIG_HPP

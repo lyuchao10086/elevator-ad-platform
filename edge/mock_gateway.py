@@ -19,18 +19,17 @@ async def handler(websocket):
                 data = json.loads(message)
                 
                 # 区分消息类型
-                if "logs" in data:
+                if "type" in data and data["type"] == "log":
                     # 日志上报消息
-                    logs = data["logs"]
-                    device_id = data.get("id", "Unknown")
+                    logs = data.get("payload", [])
+                    device_id = data.get("id", "Unknown") # 注意：新的格式中可能不直接包含 id，需要从连接上下文或 payload 中获取
                     logging.info(f"Received {len(logs)} logs from device {device_id}")
                     # for log in logs:
                     #     logging.debug(f"  Log ID: {log['log_id']}, Ad: {log['ad_file_name']}")
                         
-                elif "id" in data and "token" in data and len(data) == 2:
-                    # 心跳消息 (只有 id 和 token)
-                    device_id = data["id"]
-                    logging.info(f"Received Heartbeat from device {device_id}")
+                elif "type" in data and data["type"] == "heartbeat":
+                    # 心跳消息
+                    logging.info(f"Received Heartbeat: {data.get('payload')}")
                     
                 else:
                     # 其他未知消息

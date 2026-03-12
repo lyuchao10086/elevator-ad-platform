@@ -22,7 +22,7 @@ EdgeManager::EdgeManager() : is_initialized_(false) {
 EdgeManager::~EdgeManager() {
     // 停止网络客户端
     if (network_) {
-        network_->stop();
+        network_->stopGatewayConnection();
     }
 
     if (player_) {
@@ -79,8 +79,8 @@ bool EdgeManager::init(const std::string& configPath) {
 
     // 8. 启动网络客户端 
     // 如果配置了云端 API 地址，则初始化 NetworkClient 并启动后台上报线程
-    if (!config_.cloud_api_url.empty()) {
-        network_ = std::make_unique<NetworkClient>(config_.cloud_api_url);
+    if (!config_.gateway_ws_url.empty()) {
+        network_ = std::make_unique<NetworkClient>(config_.gateway_ws_url);
         
         // 读取上报间隔
         int interval = 10;
@@ -92,19 +92,17 @@ bool EdgeManager::init(const std::string& configPath) {
             }
         } catch (...) {}
 
-        // 启动后台线程，传入获取日志的回调
-        // 该回调函数会被网络线程定期调用，获取一批待上传的日志
-        network_->start([this](int limit) {
-            return this->getLogs(limit);
-        }, interval, config_.device_id, config_.token, 
-        [this](const std::vector<std::string>& logIds) {
-            this->updateLogStatus(logIds, 1);
-        });
-
         // 启动网关连接
         // 建立 WebSocket 长连接，用于接收服务端的实时指令
         if (!config_.gateway_ws_url.empty() && !config_.device_id.empty()) {
-            network_->startGatewayConnection(config_.gateway_ws_url, config_.device_id, config_.token);
+            network_->startGatewayConnection(config_.gateway_ws_url, config_.device_id, config_.token,
+                [this](int limit) {
+                    return this->getLogs(limit);
+                },
+                [this](const std::vector<std::string>& logIds) {
+                    this->updateLogStatus(logIds, 1);
+                }
+            );
         }
     }
 
@@ -230,7 +228,7 @@ end_loop:
     
     // 停止网络客户端
     if (network_) {
-        network_->stop();
+        network_->stopGatewayConnection();
     }
 
     SDL_Quit();
