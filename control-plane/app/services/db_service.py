@@ -5,6 +5,8 @@ from psycopg2.extras import RealDictCursor, Json
 
 
 def get_conn():
+    # 统一在这里解析 .env 并建立数据库连接，避免各模块各自维护
+    # Postgres 连接参数，降低本地开发和联调时的环境成本。
     # Try to load .env in control-plane directory if present (simple parser)
     try:
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -45,6 +47,8 @@ def get_conn():
 
 
 def list_devices(limit=100, offset=0, q=None):
+    # devices 表承担设备管理主视图的持久化查询职责；这里尽量补齐
+    # 默认字段，减轻接口层和前端的兼容负担。
     conn = get_conn()
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -107,6 +111,7 @@ def list_devices(limit=100, offset=0, q=None):
 
 
 def count_devices(q=None):
+    # 与 list_devices 配套的分页总数查询，过滤条件保持一致。
     conn = get_conn()
     try:
         cur = conn.cursor()
@@ -142,6 +147,8 @@ def count_devices_status():
 
 
 def list_materials(limit=100, offset=0):
+    # materials 表是素材管理的持久化查询面；接口层会再映射成统一
+    # 的 MaterialMeta 响应结构。
     conn = get_conn()
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -156,14 +163,15 @@ def list_materials(limit=100, offset=0):
 
 def insert_material(meta: dict):
     """
-    Insert or update a material record into Postgres materials table.
-    Accepts a dict produced by upload endpoint (keys: material_id, ad_id, file_name, oss_url, md5,
-    type, duration_sec, size_bytes, uploader_id, status, versions, tags, extra, created_at, updated_at)
+    将素材元数据写入 Postgres materials 表。
+
+    这里采用“按现有列做兼容插入 + upsert”的策略，原因是联调阶段表结构
+    可能还在演进，接口层不应该因为某个非核心字段缺失就整体失败。
     """
     conn = get_conn()
     try:
         cur = conn.cursor()
-        # discover existing columns to build compatible insert
+        # 动态探测表列，尽量兼容当前数据库里已有的表结构。
         cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'materials'")
         cols = {r[0] for r in cur.fetchall()}
 
@@ -171,7 +179,7 @@ def insert_material(meta: dict):
             # cannot persist without PK
             raise RuntimeError('materials table does not have material_id column')
 
-        # desired order of candidate columns
+        # 约定稳定的字段顺序，便于构造 INSERT / UPSERT 语句。
         candidates = [
             'material_id', 'advertiser', 'ad_id', 'file_name', 'oss_url', 'md5', 'type', 'duration_sec', 'size_bytes',
             'uploader_id', 'status', 'versions', 'tags', 'extra', 'created_at', 'updated_at'
@@ -195,7 +203,7 @@ def insert_material(meta: dict):
         placeholders = ','.join(['%s'] * len(use_cols))
         col_list = ','.join(use_cols)
 
-        # build ON CONFLICT update clause for cols other than material_id
+        # material_id 是素材主键；重复上传同一素材时走 upsert，避免重复行。
         update_cols = [c for c in use_cols if c != 'material_id']
         if update_cols:
             update_clause = ','.join([f"{c}=EXCLUDED.{c}" for c in update_cols])
@@ -210,6 +218,7 @@ def insert_material(meta: dict):
 
 
 def get_material(material_id: str):
+    # 素材详情读取。上层会决定优先采用 DB 结果还是本地索引兜底。
     conn = get_conn()
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -377,7 +386,7 @@ def list_ad_logs(limit=100, offset=0, device_id=None, ad_file_name=None, from_ts
             cur.execute(sql, params)
             rows = cur.fetchall()
 
-        # ensure expected keys present for frontend and compute completion_rate/play_result
+        # 对前端补齐稳定字段，并把原始日志转换成更适合展示/统计的结果。
         for r in rows:
             r.setdefault('log_id', r.get('log_id') or r.get('id'))
             r.setdefault('device_id', r.get('device_id'))
@@ -393,7 +402,7 @@ def list_ad_logs(limit=100, offset=0, device_id=None, ad_file_name=None, from_ts
             r.setdefault('billing_status', r.get('billing_status'))
             r.setdefault('created_at', r.get('created_at'))
 
-            # compute completion rate and play result
+            # 完播率和播放结果属于业务层字段，不直接来自 ad_logs 原始列。
             try:
                 # If is_valid explicitly false, treat as not played
                 if r.get('is_valid') is False:
@@ -435,6 +444,7 @@ def list_ad_logs(limit=100, offset=0, device_id=None, ad_file_name=None, from_ts
 
 
 def count_ad_logs(device_id=None, ad_file_name=None, from_ts=None, to_ts=None, q=None):
+    # ad_logs 列表页 / 统计页对应的总数查询。
     conn = get_conn()
     try:
         cur = conn.cursor()
@@ -605,8 +615,10 @@ def insert_campaign(meta: dict):
 
 def insert_device(**meta):
     """
-    Insert or upsert a device record into `devices` table.
-    Accepts keyword args matching column names (e.g., device_id, name, lon, lat, tenant_id, tags, status, ...)
+    将设备元数据写入 devices 表。
+
+    devices 表承载的是管理侧设备档案，和 Redis 中的运行时在线状态
+    不是一回事；这里关注的是持久化元数据。
     """
     if 'device_id' not in meta:
         raise RuntimeError('device_id is required to insert_device')
@@ -614,7 +626,7 @@ def insert_device(**meta):
     conn = get_conn()
     try:
         cur = conn.cursor()
-        # discover existing device columns
+        # 动态探测列结构，尽量兼容当前数据库中的 devices 表定义。
         cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'devices'")
         cols = {r[0] for r in cur.fetchall()}
 
@@ -639,7 +651,7 @@ def insert_device(**meta):
         col_list = ','.join(use_cols)
         placeholders = ','.join(['%s'] * len(use_cols))
 
-        # upsert: update other columns on conflict of device_id
+        # device_id 是管理侧主键；重复注册时更新已有设备元数据。
         update_cols = [c for c in use_cols if c != 'device_id']
         if update_cols:
             update_clause = ','.join([f"{c}=EXCLUDED.{c}" for c in update_cols])
@@ -655,21 +667,22 @@ def insert_device(**meta):
 
 def insert_command(meta: dict):
     """
-    Persist a command log into `command_logs` table.
-    Accepts a dict with keys like: cmd_id, device_id, action, params, status, result, send_ts, created_at, updated_at
-    Returns the inserted row id if available (column 'id'), otherwise None.
+    将命令执行过程写入 command_logs。
+
+    command_logs 是设备控制链路的审计表：谁给哪台设备发了什么命令、
+    何时发、当前状态如何、回调结果是什么，都在这里追踪。
     """
     conn = get_conn()
     try:
         cur = conn.cursor()
-        # discover existing columns to build compatible insert
+        # 同样按实际表结构探测列，避免联调阶段因为列演进导致命令链路不可用。
         cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'command_logs'")
         cols = {r[0] for r in cur.fetchall()}
 
         if not cols:
             raise RuntimeError('command_logs table not found or has no columns')
 
-        # Build insert columns based on keys provided in meta that exist in the table
+        # 只插当前表真实存在的列，避免把扩展字段直接写崩。
         use_cols = [k for k in meta.keys() if k in cols]
 
         # If created_at column exists but not provided, set it to NOW()
@@ -693,7 +706,7 @@ def insert_command(meta: dict):
         placeholders = ','.join(['%s'] * len(values) + (['NOW()'] if include_created_now else []))
 
         try:
-            # try to RETURNING id when possible
+            # 优先尝试直接插入；如果库表支持 id，则顺带返回记录标识。
             if 'id' in cols:
                 sql = f"INSERT INTO command_logs ({col_list}) VALUES ({placeholders}) RETURNING id"
                 cur.execute(sql, values)
@@ -706,7 +719,8 @@ def insert_command(meta: dict):
                 conn.commit()
                 return None
         except Exception:
-            # fallback: try update by cmd_id if provided
+            # 如果插入失败且 cmd_id 已存在，则退化为按 cmd_id 更新，
+            # 保证“先写 pending，后写 success/fail”的链路保持幂等。
             conn.rollback()
             if 'cmd_id' in meta and 'cmd_id' in cols and meta.get('cmd_id') is not None:
                 # prepare update for provided keys (excluding id)
@@ -727,15 +741,17 @@ def insert_command(meta: dict):
 
 def update_command_status(cmd_id: str = None, device_id: str = None, status: str = None, result = None):
     """
-    Update command_logs record by cmd_id if provided, otherwise update the most recent record for device_id
-    Returns number of rows updated.
+    更新 command_logs 的执行状态。
+
+    优先按 cmd_id 精确更新；如果没有 cmd_id，则退化为更新该设备最近一条
+    pending/sent 记录，用于兼容回调侧只能拿到 device_id 的情况。
     """
     if not cmd_id and not device_id:
         return 0
     conn = get_conn()
     try:
         cur = conn.cursor()
-        # prefer update by cmd_id
+        # 优先按 cmd_id 精确更新，避免误更新同设备上的其他命令。
         if cmd_id:
             # build set clause
             sets = []
@@ -745,7 +761,7 @@ def update_command_status(cmd_id: str = None, device_id: str = None, status: str
                 vals.append(status)
             if result is not None:
                 sets.append('result = %s')
-                # Always adapt result to JSON when writing into json/jsonb column
+                # result 写入 json/jsonb 字段时统一走 Json 适配。
                 vals.append(Json(result))
             if not sets:
                 return 0
@@ -755,8 +771,7 @@ def update_command_status(cmd_id: str = None, device_id: str = None, status: str
             conn.commit()
             return cur.rowcount
 
-        # else update most recent pending/sent record for device_id
-        # find id of most recent matching
+        # 如果没有 cmd_id，只能退化为按 device_id 匹配最近一条“进行中”命令。
         cur.execute("SELECT id FROM command_logs WHERE device_id = %s AND status IN ('sent','pending') ORDER BY send_ts DESC NULLS LAST, created_at DESC NULLS LAST LIMIT 1", [device_id])
         row = cur.fetchone()
         if not row:
