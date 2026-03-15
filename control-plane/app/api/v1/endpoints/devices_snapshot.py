@@ -1,9 +1,12 @@
 from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-import base64
 
-from app.services.device_snapshot_service import send_remote_command, request_device_snapshot, receive_snapshot_callback
+from app.services.device_snapshot_service import (
+    send_remote_command,
+    request_device_snapshot,
+    receive_snapshot_callback,
+)
 
 router = APIRouter()
 
@@ -13,7 +16,9 @@ class CommandRequest(BaseModel):
     command: str
     data: str = ""
 
-# 发送命令到设备
+
+# 通用远程命令入口，主要用于调试和联调。
+# 实际命令分发仍由 service 层统一转发到 Go 网关。
 @router.post("/command")
 def post_command(req: CommandRequest):
     try:
@@ -22,31 +27,33 @@ def post_command(req: CommandRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 修改 1: 获取截图接口，直接返回 URL
+
+# 截图接口直接返回 snapshot_url，而不是返回图片二进制。
+# 这样 control-plane 只负责命令编排，不承担图片内容中转。
 @router.get("/{device_id}/snapshot")
 async def get_snapshot(device_id: str):
     try:
-        # 这里返回的不再是 bytes，而是 url 字符串
         snapshot_url = await request_device_snapshot(device_id)
         return {"device_id": device_id, "snapshot_url": snapshot_url}
     except TimeoutError as e:
         raise HTTPException(status_code=504, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
-# 截图回调数据模型
-# 修改 2: 回调数据模型，适配 Go 发来的 JSON
+
+
+# Go 网关回调截图结果时使用的请求模型。
+# req_id 用于把这次回调和之前的命令日志关联起来。
 class SnapshotCallback(BaseModel):
     device_id: str
-    req_id: Optional[str] = None         # Go 发来的请求 ID
-    snapshot_url: str   # Go 发来的 OSS 地址
+    req_id: Optional[str] = None
+    snapshot_url: str
 
-# 设备截图回调接口
+
+# 网关拿到设备截图结果后，会回调这个接口。
+# 这里不处理图片内容，只负责唤醒等待中的请求并更新命令状态。
 @router.post("/snapshot/callback")
 async def snapshot_callback(body: SnapshotCallback):
     try:
-        # 传递 url 而不是 base64
-        # 改为异步调用，并把可选的 req_id 透传给 service，以便能按 cmd_id 更新 DB
         path = await receive_snapshot_callback(body.device_id, body.snapshot_url, body.req_id)
         return {"status": "ok", "url": path}
     except Exception as e:

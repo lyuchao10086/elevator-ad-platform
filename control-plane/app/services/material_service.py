@@ -87,8 +87,8 @@ MATERIAL_DIR = Path("data/materials")
 INDEX_PATH = MATERIAL_DIR / "index.json"
 
 MaterialStatus = Literal["uploaded", "transcoding", "done", "failed"]
-# update_material_status() acquires _LOCK and calls upsert_material(),
-# which also acquires _LOCK. Use a re-entrant lock to avoid deadlock.
+# 这里使用可重入锁：状态更新会再调用 upsert_material，如果只用普通锁，
+# 很容易在同一线程的嵌套调用里死锁。
 _LOCK = threading.RLock()
 
 ALLOWED_TRANSITIONS = {
@@ -155,6 +155,7 @@ def update_material_status(material_id: str, new_status: str, patch: Optional[Di
             raise KeyError("material not found")
 
         old_status = target.get("status", "uploaded")
+        # 服务层也要执行同一套状态机约束，避免回调或脚本把素材推进到非法状态。
         if new_status not in ALLOWED_TRANSITIONS.get(old_status, set()):
             raise ValueError(f"invalid status transition: {old_status} -> {new_status}")
 
@@ -172,7 +173,7 @@ def update_material_status(material_id: str, new_status: str, patch: Optional[Di
 
 def apply_transcode_callback(material_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Transcode callback: update material status to done/failed and write output meta into extra.
+    把异步转码回调写回本地素材记录。
     """
     item = get_material(material_id)
     if not item:
@@ -213,7 +214,7 @@ def get_material(material_id: str) -> Optional[Dict[str, Any]]:
 
 def delete_material(material_id: str) -> bool:
     """
-    Delete material from local index and remove file if present. Returns True if removed.
+    从本地索引删除素材，并尽量清理对应文件。
     """
     # read item first
     item = None
@@ -231,7 +232,8 @@ def delete_material(material_id: str) -> bool:
         data["items"] = new_items
         _atomic_write(data)
 
-    # attempt to remove file on disk (best-effort)
+    # 文件删除采用 best-effort：即使磁盘清理失败，也不回滚已经完成的
+    # 元数据删除，避免接口语义变得不稳定。
     try:
         if item:
             extra = item.get('extra') or {}
