@@ -8,6 +8,10 @@ from app.core.config import settings
 from app.services import db_service
 
 # 1. 维护每个设备当前正在等待快照的事件和数据
+# 按 device_id 维护当前正在等待的截图请求。
+# 每个条目里保存：
+# - event：API 请求侧等待中的 asyncio.Event
+# - data：回调到达后写入的 snapshot_url
 _waiters = {}
 # 注意：在混合使用同步和异步时，我们直接用字典，依靠主线程的 call_soon_threadsafe 保证安全
 
@@ -17,8 +21,7 @@ def send_remote_command(device_id: str, command: str, data: Optional[str] = "", 
     支持可选的 `cmd_id` 字段，网关收到后会把该 id 透传到设备，设备回报时带回，网关会回调 control-plane 的 /commands/callback
     """
     url = settings.gateway_url.rstrip("/") + "/api/send"
-    # `data` intentionally accepts both string and object payloads
-    # (e.g. snapshot params or schedule JSON).
+    # data 同时兼容字符串和 JSON 结构，后续可复用到截图、策略下发等命令。
     payload = {"device_id": device_id, "command": command, "data": data}
     if cmd_id:
         payload["cmd_id"] = cmd_id
@@ -36,7 +39,8 @@ async def request_device_snapshot(device_id: str, timeout: Optional[int] = None)
     event = asyncio.Event()
     _waiters[device_id] = {"event": event, "data": None}
 
-    # generate a cmd_id and persist a pending command_log entry (best-effort)
+    # 先落一条 pending 的 command_log，这样即使设备没有回调，
+    # 后台也能追踪到这次截图请求。
     cmd_id = str(uuid.uuid4())
     record_meta = {
         "cmd_id": cmd_id,
@@ -66,7 +70,7 @@ async def request_device_snapshot(device_id: str, timeout: Optional[int] = None)
             raise RuntimeError("截图回调数据为空")
 
         snapshot_url = entry["data"]
-        # update DB record to success (best-effort)
+        # 成功后把结果回写到 command_logs，便于运维和审计排查。
         try:
             db_service.update_command_status(cmd_id=cmd_id, status='success', result={'snapshot_url': snapshot_url})
         except Exception as e:

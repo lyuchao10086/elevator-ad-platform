@@ -13,12 +13,17 @@ from app.services import db_service
 
 router = APIRouter()
 
-# PR-2：先落到本地目录，后面再换对象存储/转码队列” 
+# 素材文件先落到本地磁盘，再写入本地索引；如数据库可用，则补做一次
+# best-effort 持久化，保证开发环境和联调环境都能工作。
 MATERIAL_DIR = Path("data/materials")
 MATERIAL_DIR.mkdir(parents=True,exist_ok=True)
 
 
 @router.post("/upload", response_model=MaterialUploadResponse)
+# 上传流程分三步：
+# 1) 二进制文件写入本地目录；
+# 2) 更新本地 JSON 索引；
+# 3) 尝试同步到 Postgres，但数据库失败不阻塞上传。
 async def upload_material(
     file: UploadFile = File(...),
     ad_id: str = Form(None),
@@ -30,14 +35,16 @@ async def upload_material(
         content = await file.read()
         size_bytes = len(content)
         md5 = hashlib.md5(content).hexdigest()
-        # generate sequential material_id where possible
+        # 优先生成可读的顺序 ID，便于 Swagger、文件目录和数据库排查。
+        # 如果推断失败，再回退到 UUID。
         try:
             from app.services.material_service import get_next_material_id
             material_id = get_next_material_id()
         except Exception:
             material_id = f"mat_{uuid.uuid4().hex[:8]}"
 
-        safe_name = Path(file.filename).name # 防止带路径的filename
+        # 去掉用户上传文件名里可能携带的路径信息，只保留文件名本身。
+        safe_name = Path(file.filename).name
         save_path = MATERIAL_DIR / f"{material_id}_{safe_name}"
         save_path.write_bytes(content)
         
@@ -63,7 +70,8 @@ async def upload_material(
         }
 
         upsert_material(meta)
-        # try to persist to Postgres if available (best-effort)
+        # 数据库持久化主要服务于查询和管理；素材文件管理本身仍以本地索引
+        # 为兜底，避免数据库短暂不可用时上传链路直接失败。
         try:
             db_service.insert_material({
                 "material_id": meta.get("material_id"),
@@ -108,7 +116,8 @@ def list_all_materials(offset: int = 0, limit: int = 50):
 
     if rows is None:
         raw_items = list_materials(offset=offset, limit=limit)
-        # convert local index items to expected keys
+        # 把本地索引记录统一转换成 MaterialMeta 响应结构，调用方不需要关心
+        # 当前数据来自 DB 还是本地索引。
         items = []
         for it in raw_items:
             items.append({
@@ -130,7 +139,7 @@ def list_all_materials(offset: int = 0, limit: int = 50):
             })
         return {"total": len(items), "items": items}
 
-    # map DB rows -> MaterialMeta fields (Postgres)
+    # 把 DB 行数据也转换成同一套 MaterialMeta 结构，保持接口返回稳定。
     items = []
     for r in rows:
         items.append({
@@ -157,7 +166,8 @@ def list_all_materials(offset: int = 0, limit: int = 50):
 
 @router.delete("/{material_id}")
 def delete_one_material(material_id: str):
-    # try DB delete first
+    # 删除时优先清理 DB 元数据，再删除本地索引和物理文件，尽量保持元数据
+    # 与磁盘状态一致。
     try:
         # if DB has material, attempt to delete; db_service may raise if not configured
         db_row = db_service.get_material(material_id)
@@ -181,12 +191,12 @@ def delete_one_material(material_id: str):
 
 @router.post("/{material_id}/transcode")
 def transcode_material(material_id: str, background_tasks: BackgroundTasks = None):
-    # This endpoint will mark material as 'transcoding' and enqueue a background placeholder job.
+    # 这里先保留一个“伪转码”入口，核心作用是把状态流转跑通，方便前端和
+    # 联调验证；后续再替换成真实转码任务。
     item = get_material(material_id)
     if not item:
         raise HTTPException(status_code=404, detail="material not found")
 
-    # mark as transcoding in local index (and DB if available)
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     upsert_material({
         "material_id": material_id,
@@ -194,7 +204,8 @@ def transcode_material(material_id: str, background_tasks: BackgroundTasks = Non
         "updated_at": now,
     })
 
-    # enqueue fake background task to simulate completion (no actual transcode here)
+    # 用后台任务模拟异步完成，保证 uploaded -> transcoding -> ready
+    # 这条链路在本地可验证。
     def _finish():
         upsert_material({
             "material_id": material_id,
@@ -213,7 +224,7 @@ def get_one_material(material_id: str):
     if not item:
         raise HTTPException(status_code=404, detail="material not found")
 
-    # normalize keys to match MaterialMeta
+    # 本地索引字段名和对外接口字段名并不完全一致，这里统一做一次映射。
     normalized = {
         "material_id": item.get("material_id"),
         "advertiser": item.get("advertiser") or item.get("ad_id"),

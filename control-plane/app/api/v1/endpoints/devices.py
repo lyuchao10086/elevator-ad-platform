@@ -11,6 +11,10 @@ router = APIRouter()
 _DEVICE_STORE = {}
 
 # 连接 Redis (配置使用 settings)
+# Redis 是 control-plane 和 Go 网关共享的运行时注册表：
+# - auth:{device_id} 存设备鉴权 token
+# - device:info:{device_id} 存轻量元数据
+# - device:online:{device_id} 由网关维护在线心跳
 rdb = redis.Redis(
     host=getattr(settings, 'redis_host', '10.12.58.42'), #服务器的ip地址
     port=getattr(settings, 'redis_port', 6379),
@@ -60,7 +64,8 @@ def register_device(payload: DeviceRegisterRequest):
         if info:
             rdb.hset(info_key, mapping=info)
         rdb.hset(info_key, 'registered_at', str(uuid.uuid1()))
-        # maintain a set of registered device ids for quick listing
+        # 额外维护一份设备集合，便于调试接口快速列出已注册设备，
+        # 避免每次都全量扫描 Redis key。
         try:
             rdb.sadd('registered_devices', device_id)
         except Exception:
@@ -72,9 +77,7 @@ def register_device(payload: DeviceRegisterRequest):
     # 写入数据库（Best-effort: upsert）
     try:
         meta = payload.dict(exclude_unset=True)
-        # ensure device_id present
         meta['device_id'] = device_id
-        # map tags if comma string -> list
         if 'tags' in meta and isinstance(meta['tags'], str):
             meta['tags'] = [t.strip() for t in meta['tags'].split(',') if t.strip()] if meta['tags'] else None
         db_service.insert_device(**meta)
@@ -91,7 +94,7 @@ def register_device(payload: DeviceRegisterRequest):
 @router.get("/", summary="List devices")
 def list_devices(q: str = None, page: int = 1, page_size: int = 20):
     try:
-        # normalize pagination
+        # 在接口层兜底分页参数，避免前端参数不完整时出现异常或超大查询。
         if page < 1:
             page = 1
         if page_size < 1 or page_size > 1000:
@@ -117,6 +120,8 @@ def list_devices(q: str = None, page: int = 1, page_size: int = 20):
 @router.get("/registered", summary="List devices registered in Redis")
 def list_registered_devices():
     try:
+        # 这个接口主要用于联调排障：它展示的是 Redis 侧可被网关鉴权的设备，
+        # 不是完整的 DB 管理视图。
         keys = rdb.keys("auth:*")
         items = []
         for k in keys:
