@@ -1,12 +1,43 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import api_router
+from app.services.background_tasks import get_task_manager
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Manage application lifecycle: startup and shutdown events.
+    """
+    # Startup
+    logger.info("Starting control-plane application...")
+    task_manager = get_task_manager()
+    
+    # Start Kafka consumer background task
+    try:
+        # Try to start Kafka consumer
+        # If it fails, continue running the app (Kafka is optional for API functionality)
+        task_manager.start_kafka_consumer()
+    except Exception as e:
+        logger.warning(f"Failed to start Kafka consumer: {e}. App will continue without log ingestion.")
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down control-plane application...")
+    task_manager.stop_kafka_consumer()
+    logger.info("Shutdown complete")
 
 
 def create_app():
     app = FastAPI(
         title="Elevator Ad Platform - Control Plane",
-        version="0.1.0"
+        version="0.1.0",
+        lifespan=lifespan
     )
 
     # ✅ 一定要在这里加 CORS（作用于整个 app）

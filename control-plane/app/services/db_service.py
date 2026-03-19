@@ -554,6 +554,33 @@ def get_campaign(campaign_id: str):
         conn.close()
 
 
+def delete_campaign(campaign_id: str) -> int:
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        ensure_campaign_tables(cur)
+
+        # 清理关联历史表，避免残留孤儿数据。
+        cur.execute("SELECT to_regclass('public.campaign_publish_logs')")
+        if cur.fetchone()[0]:
+            cur.execute("DELETE FROM campaign_publish_logs WHERE campaign_id = %s", [campaign_id])
+
+        cur.execute("SELECT to_regclass('public.campaign_versions')")
+        if cur.fetchone()[0]:
+            cur.execute("DELETE FROM campaign_versions WHERE campaign_id = %s", [campaign_id])
+
+        cur.execute("SELECT to_regclass('public.campaign_retry_batches')")
+        if cur.fetchone()[0]:
+            cur.execute("DELETE FROM campaign_retry_batches WHERE campaign_id = %s", [campaign_id])
+
+        cur.execute("DELETE FROM campaigns WHERE campaign_id = %s", [campaign_id])
+        deleted = cur.rowcount
+        conn.commit()
+        return deleted
+    finally:
+        conn.close()
+
+
 def update_campaign_status(campaign_id: str, status: str):
     conn = get_conn()
     try:
@@ -1118,3 +1145,117 @@ def get_existing_material_ids(ids: list) -> list:
         return [r[0] for r in cur.fetchall()]
     finally:
         conn.close()
+
+
+def insert_or_update_ad_log(log_record: dict) -> bool:
+    """
+    Insert or update an ad_logs record using UPSERT (INSERT ... ON CONFLICT).
+    
+    This is called by the Kafka consumer when processing playback logs from edge devices.
+    Uses log_id as the unique constraint key for deduplication.
+    
+    Args:
+        log_record: Dictionary containing log fields:
+            - log_id (required): Unique log identifier
+            - device_id (required): Device that played the ad
+            - material_id: Material/Ad ID
+            - ad_file_name: File path of the ad
+            - start_time: Playback start time (datetime)
+            - end_time: Playback end time (datetime)
+            - duration_ms: Actual playback duration in milliseconds
+            - status_code: HTTP status code (200 = success)
+            - status_msg: Status message
+            - device_ip: Device IP address (INET type)
+            - firmware_version: Device firmware version
+            - created_at: Timestamp when log was created on device (BIGINT Unix timestamp)
+            - expected_md5, actual_md5, is_valid, billing_status: Optional verification fields
+    
+    Returns:
+        True if insert/update successful, False otherwise
+    """
+    if not log_record.get('log_id') or not log_record.get('device_id'):
+        logging.warning(f"Missing required fields in ad_log: {log_record}")
+        return False
+    
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        
+        # UPSERT: insert new record or update existing one by log_id
+        sql = """
+        INSERT INTO ad_logs (
+            log_id, device_id, material_id, ad_file_name, start_time, end_time,
+            duration_ms, status_code, status_msg, device_ip, firmware_version,
+            created_at, expected_md5, actual_md5, is_valid, billing_status
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+        )
+        ON CONFLICT (log_id) DO UPDATE SET
+            device_id = EXCLUDED.device_id,
+            material_id = EXCLUDED.material_id,
+            ad_file_name = EXCLUDED.ad_file_name,
+            start_time = EXCLUDED.start_time,
+            end_time = EXCLUDED.end_time,
+            duration_ms = EXCLUDED.duration_ms,
+            status_code = EXCLUDED.status_code,
+            status_msg = EXCLUDED.status_msg,
+            device_ip = EXCLUDED.device_ip,
+            firmware_version = EXCLUDED.firmware_version,
+            created_at = EXCLUDED.created_at,
+            expected_md5 = EXCLUDED.expected_md5,
+            actual_md5 = EXCLUDED.actual_md5,
+            is_valid = EXCLUDED.is_valid,
+            billing_status = EXCLUDED.billing_status;
+        """
+        
+        cur.execute(sql, (
+            log_record.get('log_id'),
+            log_record.get('device_id'),
+            log_record.get('material_id'),
+            log_record.get('ad_file_name'),
+            log_record.get('start_time'),
+            log_record.get('end_time'),
+            log_record.get('duration_ms'),
+            log_record.get('status_code'),
+            log_record.get('status_msg'),
+            log_record.get('device_ip'),
+            log_record.get('firmware_version'),
+            log_record.get('created_at'),
+            log_record.get('expected_md5'),
+            log_record.get('actual_md5'),
+            log_record.get('is_valid'),
+            log_record.get('billing_status')
+        ))
+        
+        conn.commit()
+        return True
+        
+    except Exception as e:
+        logging.error(f"Failed to insert/update ad_log {log_record.get('log_id')}: {e}")
+        conn.rollback()
+        return False
+    finally:
+        cur.close()
+        conn.close()
+
+
+def batch_insert_ad_logs(log_records: list) -> int:
+    """
+    Batch insert multiple ad_logs records efficiently.
+    
+    Args:
+        log_records: List of log record dictionaries
+    
+    Returns:
+        Number of successfully inserted records
+    """
+    if not log_records:
+        return 0
+    
+    success_count = 0
+    for record in log_records:
+        if insert_or_update_ad_log(record):
+            success_count += 1
+    
+    logging.info(f"Batch insert: {success_count}/{len(log_records)} ad_logs records processed")
+    return success_count
