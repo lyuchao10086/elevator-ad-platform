@@ -20,6 +20,7 @@ from app.services.device_snapshot_service import send_remote_command
 router = APIRouter()
 
 _SLOT_PATTERN = re.compile(r"^(?:\*|(?:[01]\d|2[0-3]):[0-5]\d-(?:[01]\d|2[0-3]):[0-5]\d)$")
+_VERSION_PATTERN = re.compile(r"^(\d{8})_v(\d+)$", re.IGNORECASE)
 # In-memory fallback to keep local integration usable when Postgres is unavailable.
 _CAMPAIGN_STORE: Dict[str, Dict[str, Any]] = {}
 _CAMPAIGN_VERSION_STORE: Dict[str, Dict[str, Dict[str, Any]]] = {}
@@ -29,6 +30,43 @@ _RETRIED_BATCH_STORE: Dict[str, set] = {}
 
 def dt(v: Optional[datetime]):
     return v.isoformat() if isinstance(v, datetime) else v
+
+
+def _next_campaign_version(campaign_id: str, current_version: Optional[str] = None) -> str:
+    today = datetime.utcnow().strftime("%Y%m%d")
+    candidates: List[str] = []
+    if isinstance(current_version, str) and current_version:
+        candidates.append(current_version)
+
+    try:
+        rows = db_service.list_campaign_versions(campaign_id, limit=500, offset=0)
+    except Exception:
+        rows = None
+
+    if rows:
+        for r in rows:
+            v = r.get("version")
+            if isinstance(v, str) and v:
+                candidates.append(v)
+
+    if _fallback_enabled():
+        mem_versions = (_CAMPAIGN_VERSION_STORE.get(campaign_id) or {}).keys()
+        for v in mem_versions:
+            if isinstance(v, str) and v:
+                candidates.append(v)
+
+    max_seq = 0
+    for v in candidates:
+        m = _VERSION_PATTERN.fullmatch(v.strip())
+        if not m:
+            continue
+        if m.group(1) != today:
+            continue
+        seq = int(m.group(2))
+        if seq > max_seq:
+            max_seq = seq
+
+    return f"{today}_v{max_seq + 1}"
 
 
 def _parse_slot_to_range(slot: str) -> Optional[tuple]:
@@ -548,6 +586,137 @@ def create_campaign_strategy(payload: CampaignStrategyRequest):
     )
 
 
+@router.put("/{campaign_id}/strategy", response_model=CampaignStrategyResponse)
+def update_campaign_strategy(campaign_id: str, payload: CampaignStrategyRequest):
+    db_error = False
+    campaign = None
+    try:
+        campaign = db_service.get_campaign(campaign_id)
+    except Exception:
+        db_error = True
+
+    if not campaign and _fallback_enabled():
+        campaign = _CAMPAIGN_STORE.get(campaign_id)
+    if not campaign and db_error and not _fallback_enabled():
+        raise HTTPException(status_code=503, detail="database unavailable")
+    if not campaign:
+        raise HTTPException(status_code=404, detail="campaign not found")
+
+    version = _next_campaign_version(campaign_id, campaign.get("version"))
+    schedule_id = f"sch_{uuid.uuid4().hex[:8]}"
+
+    ad_ids = [ad.id for ad in payload.ads_list]
+    if len(ad_ids) != len(set(ad_ids)):
+        raise HTTPException(status_code=400, detail="duplicated ad id in ads_list")
+
+    for ad in payload.ads_list:
+        if not isinstance(ad.priority, int) or not (1 <= ad.priority <= 100):
+            raise HTTPException(status_code=400, detail=f"invalid priority for ad {ad.id}: {ad.priority}")
+        slot_ranges = []
+        seen_slots = set()
+        for s in ad.slots:
+            if s in seen_slots:
+                raise HTTPException(status_code=400, detail=f"duplicated slot for ad {ad.id}: {s}")
+            seen_slots.add(s)
+            parsed = _parse_slot_to_range(s)
+            if parsed is None:
+                raise HTTPException(status_code=400, detail=f"invalid slot for ad {ad.id}: {s}")
+            if s != "*":
+                slot_ranges.append(parsed)
+        if "*" in seen_slots and len(seen_slots) > 1:
+            raise HTTPException(status_code=400, detail=f"'*' cannot mix with other slots for ad {ad.id}")
+        if _has_slot_overlap(slot_ranges):
+            raise HTTPException(status_code=400, detail=f"overlapping slots for ad {ad.id}")
+
+    current_schedule = _normalize_schedule_json(campaign.get("schedule_json")) or {}
+    download_base_url = payload.download_base_url or payload.time_rules.get("download_base_url")
+    if not download_base_url:
+        download_base_url = current_schedule.get("download_base_url") or "https://oss.aliyun.com/ads/"
+
+    interrupts = payload.time_rules.get("interrupts") or []
+    if not isinstance(interrupts, list):
+        raise HTTPException(status_code=400, detail="time_rules.interrupts must be a list")
+    normalized_interrupts = []
+    for idx, item in enumerate(interrupts):
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail=f"time_rules.interrupts[{idx}] must be an object")
+        trigger_type = item.get("trigger_type")
+        ad_id = item.get("ad_id")
+        priority = item.get("priority")
+        play_mode = item.get("play_mode")
+        if trigger_type not in {"command", "signal"}:
+            raise HTTPException(status_code=400, detail=f"time_rules.interrupts[{idx}] invalid trigger_type")
+        if not isinstance(ad_id, str) or not ad_id:
+            raise HTTPException(status_code=400, detail=f"time_rules.interrupts[{idx}] invalid ad_id")
+        if not isinstance(priority, int) or priority <= 0:
+            raise HTTPException(status_code=400, detail=f"time_rules.interrupts[{idx}] invalid priority")
+        if not isinstance(play_mode, str) or not play_mode:
+            raise HTTPException(status_code=400, detail=f"time_rules.interrupts[{idx}] invalid play_mode")
+        normalized_interrupts.append(
+            {
+                "trigger_type": trigger_type,
+                "ad_id": ad_id,
+                "priority": priority,
+                "play_mode": play_mode,
+            }
+        )
+
+    schedule_config = ScheduleConfig(
+        version=version,
+        download_base_url=download_base_url,
+        playlist=[
+            {
+                "id": ad.id,
+                "file": ad.file,
+                "md5": ad.md5,
+                "priority": ad.priority,
+                "slots": ad.slots,
+            }
+            for ad in payload.ads_list
+        ],
+        interrupts=normalized_interrupts,
+    )
+
+    now = datetime.utcnow().isoformat() + "Z"
+    campaign_name = payload.time_rules.get("name") or campaign.get("name")
+    modifier_id = payload.time_rules.get("creator_id")
+
+    updated_row = {
+        "campaign_id": campaign_id,
+        "name": campaign_name,
+        "creator_id": modifier_id or campaign.get("creator_id"),
+        "status": "draft",
+        "schedule_json": schedule_config.model_dump(),
+        "target_device_groups": payload.devices_list,
+        "start_at": payload.time_rules.get("start_at") or campaign.get("start_at"),
+        "end_at": payload.time_rules.get("end_at") or campaign.get("end_at"),
+        "version": version,
+        "created_at": campaign.get("created_at") or now,
+        "updated_at": now,
+    }
+
+    persisted = False
+    try:
+        db_service.insert_campaign(updated_row)
+        persisted = True
+    except Exception:
+        if not _fallback_enabled():
+            raise HTTPException(status_code=503, detail="database unavailable")
+        persisted = False
+
+    if _fallback_enabled():
+        _CAMPAIGN_STORE[campaign_id] = updated_row
+    _save_campaign_version(campaign_id, version, schedule_config.model_dump())
+
+    return CampaignStrategyResponse(
+        campaign_id=campaign_id,
+        campaign_status="draft",
+        persisted=persisted,
+        schedule_id=schedule_id,
+        schedule_config=schedule_config,
+    )
+
+
 @router.get("/", response_model=CampaignListResponse)
 def list_campaigns(limit: int = 100, offset: int = 0):
     try:
@@ -610,6 +779,32 @@ def get_campaign(campaign_id: str):
     if not r:
         raise HTTPException(status_code=404, detail="campaign not found")
     return r
+
+
+@router.delete("/{campaign_id}")
+def delete_campaign(campaign_id: str):
+    deleted = 0
+    db_error = False
+    try:
+        deleted = db_service.delete_campaign(campaign_id)
+    except Exception:
+        db_error = True
+        deleted = 0
+
+    removed_mem = False
+    if _fallback_enabled():
+        removed_mem = _CAMPAIGN_STORE.pop(campaign_id, None) is not None
+        _CAMPAIGN_VERSION_STORE.pop(campaign_id, None)
+        _PUBLISH_BATCH_STORE.pop(campaign_id, None)
+        _RETRIED_BATCH_STORE.pop(campaign_id, None)
+
+    if deleted < 1 and not removed_mem and db_error and not _fallback_enabled():
+        raise HTTPException(status_code=503, detail="database unavailable")
+
+    if deleted < 1 and not removed_mem:
+        raise HTTPException(status_code=404, detail="campaign not found")
+
+    return {"ok": True, "deleted": 1}
 
 
 @router.get("/{campaign_id}/schedule-config")
