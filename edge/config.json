@@ -3,7 +3,7 @@
     "resources_dir": "resources/",
     "ads_config_path": "resources/Ads.json",
     "schedule_config_path": "resources/Schedule.json",
-    "gateway_ws_url": "ws://192.168.31.200:8080/ws", 
+    "gateway_ws_url": "ws://192.168.31.200:8080/ws",
     "device_id": "ELEV_001",
     "token": "sk_15b3acb1b0b84b01be6c7085e1271837",
     "log_level": 1

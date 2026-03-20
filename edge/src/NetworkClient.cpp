@@ -25,6 +25,16 @@ void NetworkClient::startGatewayConnection(const std::string& wsUrl, const std::
 void NetworkClient::stopGatewayConnection() {
     if (wsRunning_) {
         wsRunning_ = false;
+        
+        // 如果当前有正在连接的 WebSocket，主动关闭它以打断阻塞的 read()
+        void* ptr = currentWs_.load();
+        if (ptr) {
+            auto* ws = static_cast<httplib::ws::WebSocketClient*>(ptr);
+            try {
+                ws->close();
+            } catch (...) {}
+        }
+
         if (wsThread_.joinable()) {
             wsThread_.join();
         }
@@ -51,6 +61,7 @@ void NetworkClient::wsLoop(std::string wsUrl, std::string deviceId, std::string 
         try {
             // 创建 WebSocket 客户端
             httplib::ws::WebSocketClient ws(fullUrl);
+            currentWs_ = &ws; // 记录当前活跃的客户端
             
             if (ws.connect()) {
                 std::cout << "[NetworkClient] 网关 WebSocket 连接成功!" << std::endl;
@@ -125,15 +136,19 @@ void NetworkClient::wsLoop(std::string wsUrl, std::string deviceId, std::string 
             } else {
                 std::cerr << "[NetworkClient] WebSocket 连接失败" << std::endl;
             }
-
+            currentWs_ = nullptr; // 连接关闭后清除记录
         } catch (const std::exception& e) {
+            currentWs_ = nullptr;
             std::cerr << "[NetworkClient] WebSocket 异常: " << e.what() << std::endl;
         }
 
         // 重连等待
         if (wsRunning_) {
             std::cout << "[NetworkClient] 5秒后尝试重连..." << std::endl;
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+            // 分段休眠，以便快速响应停止信号
+            for (int i = 0; i < 50 && wsRunning_; ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
         }
     }
 }

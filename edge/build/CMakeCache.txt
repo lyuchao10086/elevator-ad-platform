@@ -495,7 +495,7 @@ PKG_CONFIG_EXECUTABLE-ADVANCED:INTERNAL=1
 SQLite3_INCLUDE_DIR-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: SQLite3_LIBRARY
 SQLite3_LIBRARY-ADVANCED:INTERNAL=1
-__pkg_config_arguments_FFMPEG:INTERNAL=REQUIRED;libavformat;libavcodec;libavutil;libswscale
+__pkg_config_arguments_FFMPEG:INTERNAL=REQUIRED;IMPORTED_TARGET;libavformat;libavcodec;libavutil;libswscale
 __pkg_config_arguments_PC_SQLite3:INTERNAL=QUIET;sqlite3
 __pkg_config_checked_FFMPEG:INTERNAL=1
 __pkg_config_checked_PC_SQLite3:INTERNAL=1

@@ -13,23 +13,6 @@
 #include <filesystem>
 #include <random> // 增加 random 头文件
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <winsock2.h>
-#include <Ws2tcpip.h>
-#pragma comment(lib, "Ws2_32.lib")
-#ifdef CreateWindow
-#undef CreateWindow
-#endif
-#ifdef ERROR
-#undef ERROR
-#endif
-#ifdef WARNING
-#undef WARNING
-#endif
-#ifdef INFO
-#undef INFO
-#endif
 #else
 #include <ifaddrs.h>
 #include <netinet/in.h>
@@ -63,6 +46,80 @@ static std::string b64encode(const std::vector<uint8_t>& in) {
     }
     return out;
 }
+void EdgeManager::handleCloudCommand(const json& msg, std::function<void(const json&)> send) {
+    bool is_snapshot = (msg.contains("type") && msg["type"] == "snapshot_request") ||
+        (msg.contains("type") && msg["type"] == "command" && msg.contains("payload") && msg["payload"] == "SNAPSHOT");
+    bool is_command = (msg.contains("type") && msg["type"] == "command") && !is_snapshot;
+    
+    if (is_snapshot) {
+        std::string req_id = msg.value("cmd_id", "");
+        if (req_id.empty()) req_id = msg.value("req_id", "");
+        
+        printInfo(LogLevel::INFO, "[云端指令] 收到截图指令，请求ID: " + req_id);
+        
+        std::string path = config_.resources_dir + "snapshot.bmp";
+        bool ok = false;
+        if (player_) {
+            ok = player_->CaptureSnapshotBMP(path);
+        }
+        
+        if (ok) {
+            printInfo(LogLevel::INFO, "[云端指令] 截图成功，已保存至: " + path);
+        } else {
+            printInfo(LogLevel::ERROR, "[云端指令] 截图失败");
+        }
+        
+        std::vector<uint8_t> bytes;
+        if (ok) {
+            std::ifstream f(path, std::ios::binary);
+            bytes = std::vector<uint8_t>(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+        }
+        std::string b64 = bytes.empty() ? "" : b64encode(bytes);
+        json snapshot_msg;
+        snapshot_msg["type"] = "snapshot_response";
+        snapshot_msg["device_id"] = config_.device_id;
+        snapshot_msg["req_id"] = req_id;
+        snapshot_msg["ts"] = static_cast<long long>(std::time(nullptr));
+        snapshot_msg["payload"] = { {"format","bmp"},{"data", b64} };
+        send(snapshot_msg);
+    } else if (is_command) {
+        std::string cmd = msg.value("payload", "");
+        std::string cmd_id = msg.value("cmd_id", "");
+        json data = msg.value("data", json::object());
+        
+        printInfo(LogLevel::INFO, "[云端指令] 收到通用指令: " + cmd + ", 参数: " + data.dump());
+        
+        std::string result = "ok";
+        if (cmd == "SET_VOLUME") {
+            int old_vol = current_volume_;
+            bool old_mute = current_mute_;
+            int vol = data.value("volume", current_volume_);
+            bool mute = data.value("mute", current_mute_);
+            current_volume_ = vol;
+            current_mute_ = mute;
+            result = std::string("set_volume:") + std::to_string(vol) + "|mute:" + (mute ? "1" : "0");
+            
+            printInfo(LogLevel::INFO, "[云端指令] 执行完成 SET_VOLUME - 执行前: (音量=" + std::to_string(old_vol) + ", 静音=" + (old_mute ? "是" : "否") + 
+                      ") -> 执行后: (音量=" + std::to_string(vol) + ", 静音=" + (mute ? "是" : "否") + ")");
+        } else if (cmd == "REBOOT") {
+            result = "reboot_ok";
+            should_soft_reboot_ = true;
+            printInfo(LogLevel::INFO, "[云端指令] 执行 REBOOT，设备即将软重启");
+        } else {
+            result = cmd + "_ok";
+            printInfo(LogLevel::INFO, "[云端指令] 未知指令或无需处理的指令: " + cmd);
+        }
+        json resp;
+        resp["type"] = "command_response";
+        resp["device_id"] = config_.device_id;
+        resp["req_id"] = msg.value("req_id", "");
+        resp["ts"] = static_cast<long long>(std::time(nullptr));
+        resp["payload"] = { {"cmd_id", cmd_id}, {"status","success"}, {"result", result} };
+        send(resp);
+        printInfo(LogLevel::INFO, "[云端指令] 回执已发送，指令ID: " + cmd_id);
+    }
+}
+
 EdgeManager::EdgeManager() : is_initialized_(false) {
 }
 
@@ -149,55 +206,7 @@ bool EdgeManager::init(const std::string& configPath) {
                 [this](int limit) { return this->getLogs(limit); },
                 [this](const std::vector<std::string>& logIds) { this->updateLogStatus(logIds, 1); },
                 [this](const json& msg, std::function<void(const json&)> send) {
-                    bool is_snapshot = (msg.contains("type") && msg["type"] == "snapshot_request") ||
-                        (msg.contains("type") && msg["type"] == "command" && msg.contains("payload") && msg["payload"] == "SNAPSHOT");
-                    bool is_command = (msg.contains("type") && msg["type"] == "command") && !is_snapshot;
-                    if (is_snapshot) {
-                        std::string req_id = msg.value("cmd_id", "");
-                        if (req_id.empty()) req_id = msg.value("req_id", "");
-                        std::string path = config_.resources_dir + "snapshot.bmp";
-                        bool ok = false;
-                        if (player_) {
-                            ok = player_->CaptureSnapshotBMP(path);
-                        }
-                        std::vector<uint8_t> bytes;
-                        if (ok) {
-                            std::ifstream f(path, std::ios::binary);
-                            bytes = std::vector<uint8_t>(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
-                        }
-                        std::string b64 = bytes.empty() ? "" : b64encode(bytes);
-                        json snapshot_msg;
-                        snapshot_msg["type"] = "snapshot_response";
-                        snapshot_msg["device_id"] = config_.device_id;
-                        snapshot_msg["req_id"] = req_id;
-                        snapshot_msg["ts"] = static_cast<long long>(std::time(nullptr));
-                        snapshot_msg["payload"] = { {"format","bmp"},{"data", b64} };
-                        send(snapshot_msg);
-                    } else if (is_command) {
-                        std::string cmd = msg.value("payload", "");
-                        std::string cmd_id = msg.value("cmd_id", "");
-                        json data = msg.value("data", json::object());
-                        std::string result = "ok";
-                        if (cmd == "SET_VOLUME") {
-                            int vol = data.value("volume", current_volume_);
-                            bool mute = data.value("mute", current_mute_);
-                            current_volume_ = vol;
-                            current_mute_ = mute;
-                            result = std::string("set_volume:") + std::to_string(vol) + "|mute:" + (mute ? "1" : "0");
-                        } else if (cmd == "REBOOT") {
-                            result = "reboot_ok";
-                            should_soft_reboot_ = true;
-                        } else {
-                            result = cmd + "_ok";
-                        }
-                        json resp;
-                        resp["type"] = "command_response";
-                        resp["device_id"] = config_.device_id;
-                        resp["req_id"] = msg.value("req_id", "");
-                        resp["ts"] = static_cast<long long>(std::time(nullptr));
-                        resp["payload"] = { {"cmd_id", cmd_id}, {"status","success"}, {"result", result} };
-                        send(resp);
-                    }
+                    this->handleCloudCommand(msg, send);
                 }
             );
         }
@@ -269,55 +278,7 @@ void EdgeManager::run() {
                         [this](int limit) { return this->getLogs(limit); },
                         [this](const std::vector<std::string>& logIds) { this->updateLogStatus(logIds, 1); },
                         [this](const json& msg, std::function<void(const json&)> send) {
-                            bool is_snapshot = (msg.contains("type") && msg["type"] == "snapshot_request") ||
-                                (msg.contains("type") && msg["type"] == "command" && msg.contains("payload") && msg["payload"] == "SNAPSHOT");
-                            bool is_command = (msg.contains("type") && msg["type"] == "command") && !is_snapshot;
-                            if (is_snapshot) {
-                                std::string req_id = msg.value("cmd_id", "");
-                                if (req_id.empty()) req_id = msg.value("req_id", "");
-                                std::string path = config_.resources_dir + "snapshot.bmp";
-                                bool ok = false;
-                                if (player_) {
-                                    ok = player_->CaptureSnapshotBMP(path);
-                                }
-                                std::vector<uint8_t> bytes;
-                                if (ok) {
-                                    std::ifstream f(path, std::ios::binary);
-                                    bytes = std::vector<uint8_t>(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
-                                }
-                                std::string b64 = bytes.empty() ? "" : b64encode(bytes);
-                                json snapshot_msg;
-                                snapshot_msg["type"] = "snapshot_response";
-                                snapshot_msg["device_id"] = config_.device_id;
-                                snapshot_msg["req_id"] = req_id;
-                                snapshot_msg["ts"] = static_cast<long long>(std::time(nullptr));
-                                snapshot_msg["payload"] = { {"format","bmp"},{"data", b64} };
-                                send(snapshot_msg);
-                            } else if (is_command) {
-                                std::string cmd = msg.value("payload", "");
-                                std::string cmd_id = msg.value("cmd_id", "");
-                                json data = msg.value("data", json::object());
-                                std::string result = "ok";
-                                if (cmd == "SET_VOLUME") {
-                                    int vol = data.value("volume", current_volume_);
-                                    bool mute = data.value("mute", current_mute_);
-                                    current_volume_ = vol;
-                                    current_mute_ = mute;
-                                    result = std::string("set_volume:") + std::to_string(vol) + "|mute:" + (mute ? "1" : "0");
-                                } else if (cmd == "REBOOT") {
-                                    result = "reboot_ok";
-                                    should_soft_reboot_ = true;
-                                } else {
-                                    result = cmd + "_ok";
-                                }
-                                json resp;
-                                resp["type"] = "command_response";
-                                resp["device_id"] = config_.device_id;
-                                resp["req_id"] = msg.value("req_id", "");
-                                resp["ts"] = static_cast<long long>(std::time(nullptr));
-                                resp["payload"] = { {"cmd_id", cmd_id}, {"status","success"}, {"result", result} };
-                                send(resp);
-                            }
+                            this->handleCloudCommand(msg, send);
                         }
                     );
                 }
@@ -362,15 +323,21 @@ void EdgeManager::run() {
                         // 稍微休眠，释放 CPU，具体休眠时间由 VideoPlayer 内部帧率控制决定，这里只是为了防止空转过快
                         std::this_thread::sleep_for(std::chrono::milliseconds(1));
                         
+                        // 实时检查指令与退出状态
+                        if (should_soft_reboot_) {
+                             player_->Stop();
+                             printInfo(LogLevel::INFO, "检测到重启指令 (播放中)，停止播放并执行重启");
+                             break; 
+                        }
+                        if (should_exit_) {
+                             player_->Stop();
+                             goto end_loop;
+                        }
                         // 实时检查窗口状态
                         // 如果用户手动关闭了窗口，这里需要感知并退出
                         if (!player_->IsWindowOpen()) {
                              player_->Stop();
                              printInfo(LogLevel::INFO, "检测到窗口关闭 (播放中)，准备退出");
-                             goto end_loop;
-                        }
-                        if (should_exit_) {
-                             player_->Stop();
                              goto end_loop;
                         }
                     }
@@ -536,10 +503,14 @@ void EdgeManager::recordPlayEnd(const PlayItem& item, long long startTime, int d
 bool EdgeManager::waitForPlaybackOrStop() {
     // 分段休眠并处理事件，确保能响应退出
     for (int i = 0; i < 50; ++i) {
+        if (should_exit_ || should_soft_reboot_) {
+            return false;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
+                should_exit_ = true;
                 return false; // 收到退出信号
             }
         }

@@ -282,6 +282,14 @@ private:
      * @return false 收到退出信号，应终止主循环
      */
     bool waitForPlaybackOrStop();
+
+    /**
+     * @brief 处理来自云端的指令
+     * 
+     * @param msg 接收到的云端消息 (JSON)
+     * @param send 回调函数，用于发送回包
+     */
+    void handleCloudCommand(const json& msg, std::function<void(const json&)> send);
 };
 
 #endif // EDGE_MANAGER_HPP
