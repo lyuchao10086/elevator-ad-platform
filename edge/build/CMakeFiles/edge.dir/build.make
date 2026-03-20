@@ -159,7 +159,13 @@ edge: CMakeFiles/edge.dir/src/EdgeManager.cpp.o
 edge: CMakeFiles/edge.dir/src/VideoPlayer.cpp.o
 edge: CMakeFiles/edge.dir/src/NetworkClient.cpp.o
 edge: CMakeFiles/edge.dir/build.make
+edge: /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/libsqlite3.tbd
 edge: /opt/homebrew/Cellar/sdl2/2.32.6/lib/libSDL2.dylib
+edge: /opt/homebrew/Cellar/sdl2/2.32.6/lib/libSDL2main.a
+edge: /opt/homebrew/Cellar/ffmpeg/7.1.1_2/lib/libavformat.dylib
+edge: /opt/homebrew/Cellar/ffmpeg/7.1.1_2/lib/libavcodec.dylib
+edge: /opt/homebrew/Cellar/ffmpeg/7.1.1_2/lib/libswscale.dylib
+edge: /opt/homebrew/Cellar/ffmpeg/7.1.1_2/lib/libavutil.dylib
 edge: CMakeFiles/edge.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/Users/lyuchao/Documents/trae_projects/edge/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Linking CXX executable edge"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/edge.dir/link.txt --verbose=$(VERBOSE)

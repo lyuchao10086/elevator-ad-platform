@@ -12,12 +12,17 @@
 		[
 			"add_executable",
 			"target_link_libraries",
+			"set_property",
+			"_pkg_create_imp_target",
+			"_pkg_recalculate",
+			"pkg_check_modules",
 			"include_directories",
 			"target_include_directories"
 		],
 		"files" : 
 		[
-			"CMakeLists.txt"
+			"CMakeLists.txt",
+			"/opt/homebrew/share/cmake/Modules/FindPkgConfig.cmake"
 		],
 		"nodes" : 
 		[
@@ -27,25 +32,55 @@
 			{
 				"command" : 0,
 				"file" : 0,
-				"line" : 25,
+				"line" : 28,
 				"parent" : 0
 			},
 			{
 				"command" : 1,
 				"file" : 0,
-				"line" : 55,
+				"line" : 66,
 				"parent" : 0
 			},
 			{
-				"command" : 2,
+				"command" : 5,
 				"file" : 0,
-				"line" : 8,
+				"line" : 22,
 				"parent" : 0
+			},
+			{
+				"command" : 4,
+				"file" : 1,
+				"line" : 877,
+				"parent" : 3
 			},
 			{
 				"command" : 3,
+				"file" : 1,
+				"line" : 361,
+				"parent" : 4
+			},
+			{
+				"command" : 2,
+				"file" : 1,
+				"line" : 342,
+				"parent" : 5
+			},
+			{
+				"command" : 6,
 				"file" : 0,
-				"line" : 34,
+				"line" : 11,
+				"parent" : 0
+			},
+			{
+				"command" : 7,
+				"file" : 0,
+				"line" : 37,
+				"parent" : 0
+			},
+			{
+				"command" : 7,
+				"file" : 0,
+				"line" : 43,
 				"parent" : 0
 			}
 		]
@@ -62,23 +97,24 @@
 			"includes" : 
 			[
 				{
-					"backtrace" : 3,
+					"backtrace" : 7,
 					"path" : "/Users/lyuchao/Documents/trae_projects/edge/include"
 				},
 				{
-					"backtrace" : 4,
-					"path" : "/opt/homebrew/Cellar/ffmpeg/7.1.1_2/include"
-				},
-				{
-					"backtrace" : 4,
+					"backtrace" : 8,
 					"path" : "/opt/homebrew/Cellar/sdl2/2.32.6/include"
 				},
 				{
-					"backtrace" : 4,
+					"backtrace" : 9,
 					"path" : "/opt/homebrew/include"
 				},
 				{
-					"backtrace" : 4,
+					"backtrace" : 8,
+					"isSystem" : true,
+					"path" : "/opt/homebrew/Cellar/ffmpeg/7.1.1_2/include"
+				},
+				{
+					"backtrace" : 8,
 					"isSystem" : true,
 					"path" : "/opt/homebrew/Cellar/sdl2/2.32.6/include/SDL2"
 				}
@@ -126,27 +162,7 @@
 			},
 			{
 				"backtrace" : 2,
-				"fragment" : "-lsqlite3",
-				"role" : "libraries"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "-lavformat",
-				"role" : "libraries"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "-lavcodec",
-				"role" : "libraries"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "-lswscale",
-				"role" : "libraries"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "-lavutil",
+				"fragment" : "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib/libsqlite3.tbd",
 				"role" : "libraries"
 			},
 			{
@@ -156,7 +172,27 @@
 			},
 			{
 				"backtrace" : 2,
-				"fragment" : "-L/opt/homebrew/lib -lavformat -lavcodec -lavutil -lswscale",
+				"fragment" : "/opt/homebrew/Cellar/sdl2/2.32.6/lib/libSDL2main.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 6,
+				"fragment" : "/opt/homebrew/Cellar/ffmpeg/7.1.1_2/lib/libavformat.dylib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 6,
+				"fragment" : "/opt/homebrew/Cellar/ffmpeg/7.1.1_2/lib/libavcodec.dylib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 6,
+				"fragment" : "/opt/homebrew/Cellar/ffmpeg/7.1.1_2/lib/libswscale.dylib",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 6,
+				"fragment" : "/opt/homebrew/Cellar/ffmpeg/7.1.1_2/lib/libavutil.dylib",
 				"role" : "libraries"
 			}
 		],

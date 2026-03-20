@@ -56,6 +56,7 @@ private:
 
     std::thread wsThread_;
     std::atomic<bool> wsRunning_;
+    std::atomic<void*> currentWs_{nullptr}; // 记录当前的 WebSocket 客户端指针，用于在外部关闭
 
     // WebSocket 网关维护循环
     void wsLoop(std::string wsUrl, std::string deviceId, std::string token,
