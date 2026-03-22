@@ -124,6 +124,12 @@ EdgeManager::EdgeManager() : is_initialized_(false) {
 }
 
 EdgeManager::~EdgeManager() {
+    // 停止同步线程
+    syncRunning_ = false;
+    if (syncThread_.joinable()) {
+        syncThread_.join();
+    }
+
     // 停止网络客户端
     if (network_) {
         network_->stopGatewayConnection();
@@ -155,37 +161,37 @@ bool EdgeManager::init(const std::string& configPath) {
         return false;
     }
 
+    // 3. 初始化网络客户端 (必须在同步数据之前，因为同步现在依赖网络)
+    if (!config_.gateway_ws_url.empty()) {
+        network_ = std::make_unique<NetworkClient>(config_.gateway_ws_url);
+    }
+
     // 4. 加载广告素材数据
     if (!syncAds()) {
-        printInfo(LogLevel::ERROR, "同步广告数据失败");
-        return false;
+        printInfo(LogLevel::WARNING, "初始同步广告数据失败，将依赖本地缓存或后续定时更新");
+    } else {
+        printInfo(LogLevel::INFO, "广告数据已入库");
     }
-    printInfo(LogLevel::INFO, "广告数据已入库");
 
     // 5. 加载排期策略数据
     if (!syncSchedule()) {
-        printInfo(LogLevel::ERROR, "同步排期数据失败");
-        return false;
+        printInfo(LogLevel::WARNING, "初始同步排期数据失败，将依赖本地缓存或后续定时更新");
+    } else {
+        printInfo(LogLevel::INFO, "排期数据已入库");
     }
-    printInfo(LogLevel::INFO, "排期数据已入库");
 
     // 6. 初始化播放器
-    // 创建 VideoPlayer 实例，后续将用于加载和播放媒体文件
     player_ = std::make_unique<VideoPlayer>();
 
     is_initialized_ = true;
     
     // 7. 初始化播放列表 (检查素材完整性)
-    // 预先检查排期中引用的所有素材文件是否存在，避免播放时出错
     if (!initPlaylist()) {
         printInfo(LogLevel::WARNING, "播放列表初始化存在问题");
     }
 
-    // 8. 启动网络客户端 
-    // 如果配置了云端 API 地址，则初始化 NetworkClient 并启动后台上报线程
-    if (!config_.gateway_ws_url.empty()) {
-        network_ = std::make_unique<NetworkClient>(config_.gateway_ws_url);
-        
+    // 8. 启动网络连接 (WebSocket 长连接)
+    if (network_ && !config_.gateway_ws_url.empty() && !config_.device_id.empty()) {
         // 读取上报间隔
         int interval = 10;
         try {
@@ -196,24 +202,24 @@ bool EdgeManager::init(const std::string& configPath) {
             }
         } catch (...) {}
 
-        // 启动网关连接
-        // 建立 WebSocket 长连接，用于接收服务端的实时指令
-        if (!config_.gateway_ws_url.empty() && !config_.device_id.empty()) {
-            network_->startGatewayConnection(
-                config_.gateway_ws_url,
-                config_.device_id,
-                config_.token,
-                [this](int limit) { return this->getLogs(limit); },
-                [this](const std::vector<std::string>& logIds) { this->updateLogStatus(logIds, 1); },
-                [this](const json& msg, std::function<void(const json&)> send) {
-                    this->handleCloudCommand(msg, send);
-                }
-            );
-        }
+        network_->startGatewayConnection(
+            config_.gateway_ws_url,
+            config_.device_id,
+            config_.token,
+            [this](int limit) { return this->getLogs(limit); },
+            [this](const std::vector<std::string>& logIds) { this->updateLogStatus(logIds, 1); },
+            [this](const json& msg, std::function<void(const json&)> send) {
+                this->handleCloudCommand(msg, send);
+            }
+        );
     }
 
     // 9. 检查并清理存储空间
     cleanupStorage();
+
+    // 10. 启动定时同步线程
+    syncRunning_ = true;
+    syncThread_ = std::thread(&EdgeManager::syncLoop, this);
 
     printInfo(LogLevel::INFO, "EdgeManager 初始化完成");
 
@@ -939,15 +945,6 @@ bool EdgeManager::initDatabase() {
         std::cout << "正在连接数据库: " << config_.db_path << std::endl;
         db_ = std::make_unique<Database>(config_.db_path);
 
-        // 0. 清空现有表结构 (根据需求，每次启动重置)
-        db_->execute("DROP TABLE IF EXISTS log;");
-        db_->execute("DROP TABLE IF EXISTS playlist;");
-        db_->execute("DROP TABLE IF EXISTS timeslot_playlist;"); // 旧表，以防万一
-        db_->execute("DROP TABLE IF EXISTS schedule_timeslot;");
-        db_->execute("DROP TABLE IF EXISTS schedule_interrupt;");
-        db_->execute("DROP TABLE IF EXISTS schedule;");
-        db_->execute("DROP TABLE IF EXISTS advertisement;");
-
         // 1. 日志表 (log)
         // 存储系统运行日志
         std::string createLogTableSQL = 
@@ -1048,22 +1045,19 @@ bool EdgeManager::initDatabase() {
 }
 
 bool EdgeManager::syncAds() {
-    try {
-        std::ifstream f(config_.ads_config_path);
-        if (!f.is_open()) {
-            std::cerr << "无法打开广告配置文件: " << config_.ads_config_path << std::endl;
-            return false;
-        }
-
-        json j;
-        f >> j;
-
-        return syncAds(j);
-
-    } catch (const std::exception& e) {
-        std::cerr << "加载广告数据失败: " << e.what() << std::endl;
+    if (!network_) {
+        printInfo(LogLevel::WARNING, "NetworkClient 未初始化，无法同步广告");
         return false;
     }
+    printInfo(LogLevel::INFO, "正在从网关拉取最新广告...");
+    json ads = network_->fetchAds();
+    if (!ads.is_null() && !ads.empty()) {
+        bool ok = syncAds(ads);
+        network_->reportSyncResult("ads", ok ? "success" : "failed", ok ? "广告同步成功" : "广告解析入库失败");
+        return ok;
+    }
+    network_->reportSyncResult("ads", "failed", "拉取广告数据为空或网络错误");
+    return false;
 }
 
 bool EdgeManager::syncAds(const json& j) {
@@ -1074,14 +1068,13 @@ bool EdgeManager::syncAds(const json& j) {
         }
 
         auto ads = j["ads"].get<std::vector<Advertisement>>();
-        std::cout << "读取到 " << ads.size() << " 条广告数据" << std::endl;
+        std::cout << "同步 " << ads.size() << " 条广告数据到数据库" << std::endl;
 
         // 开启事务
-        db_->execute("BEGIN TRANSACTION;");
+        db_->beginTransaction();
 
         for (const auto& ad : ads) {
             // 使用 REPLACE INTO 避免重复插入报错，且能更新数据
-            // 注意：这里不再从 JSON 读取 last_played_time，而是保留数据库中原有的值（如果存在）或者设为 0
             std::string sql = "REPLACE INTO advertisement (ad_id, type, filename, md5, duration, bytes, last_played_time) VALUES ('"
                 + ad.getAdId() + "', '"
                 + ad.getType() + "', '"
@@ -1093,44 +1086,39 @@ bool EdgeManager::syncAds(const json& j) {
             db_->execute(sql);
         }
 
-        db_->execute("COMMIT;");
-        std::cout << "广告数据已入库" << std::endl;
+        db_->commit();
         return true;
 
     } catch (const std::exception& e) {
-        std::cerr << "解析广告数据异常: " << e.what() << std::endl;
-        // 尝试回滚
-        try { db_->execute("ROLLBACK;"); } catch (...) {}
+        std::cerr << "同步广告数据异常: " << e.what() << std::endl;
+        try { db_->rollback(); } catch (...) {}
         return false;
     }
 }
 
 bool EdgeManager::syncSchedule() {
-    try {
-        std::ifstream f(config_.schedule_config_path);
-        if (!f.is_open()) {
-            std::cerr << "无法打开排期配置文件: " << config_.schedule_config_path << std::endl;
-            return false;
-        }
-
-        json j;
-        f >> j;
-        
-        return syncSchedule(j);
-
-    } catch (const std::exception& e) {
-        std::cerr << "加载排期数据失败: " << e.what() << std::endl;
+    if (!network_) {
+        printInfo(LogLevel::WARNING, "NetworkClient 未初始化，无法同步排期");
         return false;
     }
+    printInfo(LogLevel::INFO, "正在从网关拉取最新排期...");
+    json schedule = network_->fetchSchedule();
+    if (!schedule.is_null() && !schedule.empty()) {
+        bool ok = syncSchedule(schedule);
+        network_->reportSyncResult("schedule", ok ? "success" : "failed", ok ? "排期同步成功" : "排期解析入库失败");
+        return ok;
+    }
+    network_->reportSyncResult("schedule", "failed", "拉取排期数据为空或网络错误");
+    return false;
 }
 
 bool EdgeManager::syncSchedule(const json& j) {
     try {
         Schedule schedule = Schedule::fromJson(j);
         
-        std::cout << "读取到排期策略: " << schedule.getPolicyId() << std::endl;
+        std::cout << "同步排期策略: " << schedule.getPolicyId() << " 到数据库" << std::endl;
 
-        db_->execute("BEGIN TRANSACTION;");
+        db_->beginTransaction();
 
         // 1. 插入 schedule 表
         std::string scheduleSQL = "REPLACE INTO schedule (policy_id, effective_date, download_base_url, default_volume, download_retry_count, report_interval_sec) VALUES ('"
@@ -1143,7 +1131,6 @@ bool EdgeManager::syncSchedule(const json& j) {
         db_->execute(scheduleSQL);
 
         // 2. 插入 schedule_interrupt 表
-        // 先删除旧的关联数据（简单起见，先删后插）
         db_->execute("DELETE FROM schedule_interrupt WHERE policy_id = '" + schedule.getPolicyId() + "';");
         for (const auto& interrupt : schedule.getInterrupts()) {
             std::string interruptSQL = "INSERT INTO schedule_interrupt (policy_id, trigger_type, ad_id, priority, play_mode, status) VALUES ('"
@@ -1151,14 +1138,13 @@ bool EdgeManager::syncSchedule(const json& j) {
                 + interrupt.getTriggerType() + "', '"
                 + interrupt.getAdId() + "', "
                 + std::to_string(interrupt.getPriority()) + ", '"
-                + interrupt.getPlayMode() + "', 0);"; // 默认 status = 0
+                + interrupt.getPlayMode() + "', 0);";
             db_->execute(interruptSQL);
         }
 
         // 3. 插入 schedule_timeslot 表
         db_->execute("DELETE FROM schedule_timeslot WHERE policy_id = '" + schedule.getPolicyId() + "';");
         for (const auto& slot : schedule.getTimeSlots()) {
-            // 将 playlist 数组转换为 JSON 字符串
             json playlistJson = slot.getPlaylist();
             std::string playlistStr = playlistJson.dump();
 
@@ -1173,13 +1159,27 @@ bool EdgeManager::syncSchedule(const json& j) {
             db_->execute(slotSQL);
         }
 
-        db_->execute("COMMIT;");
-        std::cout << "排期数据已入库" << std::endl;
-        return true;
+            db_->commit();
+            return true;
 
     } catch (const std::exception& e) {
-        std::cerr << "解析排期数据异常: " << e.what() << std::endl;
-        try { db_->execute("ROLLBACK;"); } catch (...) {}
+        std::cerr << "同步排期数据异常: " << e.what() << std::endl;
+        try { db_->rollback(); } catch (...) {}
         return false;
+    }
+}
+
+void EdgeManager::syncLoop() {
+    printInfo(LogLevel::INFO, "定时同步线程已启动 (周期: 1分钟)");
+    while (syncRunning_) {
+        // 1. 同步广告
+        syncAds();
+        // 2. 同步排期
+        syncSchedule();
+
+        // 休眠 60s，分段休眠以响应退出
+        for (int i = 0; i < 600 && syncRunning_; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
     }
 }

@@ -221,6 +221,11 @@ private:
     std::atomic<bool> should_exit_{false};
     std::atomic<bool> should_soft_reboot_{false};
 
+    // 同步线程
+    std::thread syncThread_;
+    std::atomic<bool> syncRunning_{false};
+    void syncLoop();
+
     // 轮播索引 (用于 getNextAsset 轮询 timeslot 中的列表)
     size_t current_playlist_index_ = 0;
     // 上次播放的 timeslot ID，用于重置索引

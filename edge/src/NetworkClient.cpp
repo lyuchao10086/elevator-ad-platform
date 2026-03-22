@@ -153,6 +153,60 @@ void NetworkClient::wsLoop(std::string wsUrl, std::string deviceId, std::string 
     }
 }
 
+json NetworkClient::fetchAds() {
+    try {
+        httplib::Client cli(apiUrl_);
+        auto res = cli.Get("/api/ads"); // 假设网关提供 /api/ads 接口
+        if (res && res->status == 200) {
+            std::cout << "[NetworkClient] 获取广告数据成功" << std::endl;
+            return json::parse(res->body);
+        } else {
+            std::cerr << "[NetworkClient] 获取广告数据失败: " << (res ? std::to_string(res->status) : "无法连接") << std::endl;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[NetworkClient] 获取广告数据异常: " << e.what() << std::endl;
+    }
+    return json::object();
+}
+
+json NetworkClient::fetchSchedule() {
+    try {
+        httplib::Client cli(apiUrl_);
+        auto res = cli.Get("/api/schedule"); // 假设网关提供 /api/schedule 接口
+        if (res && res->status == 200) {
+            std::cout << "[NetworkClient] 获取排期数据成功" << std::endl;
+            return json::parse(res->body);
+        } else {
+            std::cerr << "[NetworkClient] 获取排期数据失败: " << (res ? std::to_string(res->status) : "无法连接") << std::endl;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[NetworkClient] 获取排期数据异常: " << e.what() << std::endl;
+    }
+    return json::object();
+}
+
+bool NetworkClient::reportSyncResult(const std::string& type, const std::string& status, const std::string& detail) {
+    try {
+        httplib::Client cli(apiUrl_);
+        json payload;
+        payload["type"] = type;
+        payload["status"] = status;
+        payload["detail"] = detail;
+        payload["timestamp"] = std::time(nullptr);
+
+        auto res = cli.Post("/api/sync/report", payload.dump(), "application/json");
+        if (res && res->status == 200) {
+            std::cout << "[NetworkClient] 同步结果汇报成功: " << type << " - " << status << std::endl;
+            return true;
+        } else {
+            std::cerr << "[NetworkClient] 同步结果汇报失败: " << (res ? std::to_string(res->status) : "无法连接") << std::endl;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[NetworkClient] 同步结果汇报异常: " << e.what() << std::endl;
+    }
+    return false;
+}
+
 bool NetworkClient::sendHeartbeat(void* wsClient, const std::string& deviceId, const std::string& token) {
     if (!wsClient) return false;
     auto* ws = static_cast<httplib::ws::WebSocketClient*>(wsClient);

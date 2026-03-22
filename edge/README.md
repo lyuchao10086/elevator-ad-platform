@@ -21,7 +21,8 @@
 
 *   **多模式播放**：支持时间段轮播、定点插播、紧急插播等多种播放策略。
 *   **离线运行**：所有排期和素材均本地存储，网络断开不影响播放。
-*   **本地持久化**：使用 SQLite 存储排期数据和播放日志，支持事务处理。
+*   **数据自动同步**：具备后台同步线程，每分钟自动从网关拉取最新的广告素材元数据和排期策略。
+*   **本地持久化**：使用 SQLite 存储排期数据和播放日志，启动时保留历史数据，支持断电恢复。
 *   **日志上报**：支持 WebSocket 实时上报播放日志，具备断网重连和本地缓存机制。
 *   **远程控制**：支持通过 WebSocket 网关接收远程指令（如更新排期、截屏等）。
 *   **自动维护**：具备磁盘空间监控和 LRU 清理机制。
@@ -110,7 +111,8 @@ chcp 65001
 - **关键方法**:
     - `init()`: 初始化配置、数据库、网络和 SDL。
     - `run()`: 主循环，负责计算下一个播放任务 (`getNextAsset`) 并调度播放。
-    - `syncAds()`, `syncSchedule()`: 同步本地 JSON 配置文件到数据库。
+    - `syncAds()`, `syncSchedule()`: 从网关拉取最新数据并同步到本地数据库。
+    - `syncLoop()`: 后台线程，每 60 秒触发一次 `syncAds` 和 `syncSchedule`。
     - `printInfo()`: 统一日志输出接口。
     - `cleanupStorage()`: 磁盘空间清理。
 
@@ -125,8 +127,9 @@ chcp 65001
 ### 3. NetworkClient (网络客户端)
 - **职责**: 处理与云端的通信。
 - **关键方法**:
-    - `start(logProvider, ...)`: 启动日志上报线程。
-    - `startGatewayConnection(...)`: 启动网关长连接线程，发送心跳。
+    - `fetchAds()`, `fetchSchedule()`: 通过 HTTP GET 请求从网关拉取最新数据。
+    - `startGatewayConnection(...)`: 启动网关 WebSocket 长连接线程，发送心跳和日志。
+    - `stopGatewayConnection()`: 安全停止所有网络连接。
 
 ### 4. Database (数据层)
 - **职责**: SQLite3 的 RAII 封装。
@@ -172,14 +175,22 @@ chcp 65001
 ## 接口说明
 
 ### 内部接口调用关系
-1. **播放流程**: `EdgeManager::run()` -> `EdgeManager::getNextAsset()` -> `Database::query()` (查询 schedule 表) -> `VideoPlayer::Load()` -> `VideoPlayer::Play()`.
-2. **日志流程**: `EdgeManager::recordPlayEnd()` -> `Database::execute()` (写入 log 表) -> `NetworkClient` (后台线程读取 log 表并上报) -> `EdgeManager::updateLogStatus()` (更新 uploaded=1).
+1. **同步流程**: `EdgeManager::syncLoop()` -> `EdgeManager::syncAds()`/`syncSchedule()` -> `NetworkClient::fetchAds()`/`fetchSchedule()` -> `Database::execute()` (REPLACE INTO).
+2. **播放流程**: `EdgeManager::run()` -> `EdgeManager::getNextAsset()` -> `Database::query()` (查询 schedule 表) -> `VideoPlayer::Load()` -> `VideoPlayer::Play()`.
+3. **日志流程**: `EdgeManager::recordPlayEnd()` -> `Database::execute()` (写入 log 表) -> `NetworkClient` (后台线程读取 log 表并上报) -> `EdgeManager::updateLogStatus()` (更新 uploaded=1).
 
-### 网络接口 (WebSocket)
-- 设备连接地址：`ws://<gateway-host>:<port>/ws?device_id=<ID>&token=<TOKEN>`
-- 心跳包：`{"type": "heartbeat", "payload": "ping"}`
-- 日志包：`{"type": "log", "payload": [ ... ]}`
-- 指令下发与回包（兼容两种风格）：
+### 网络接口 (HTTP & WebSocket)
+- **数据同步 (HTTP GET)**:
+    - 获取广告素材: `GET /api/ads`
+    - 获取排期策略: `GET /api/schedule`
+- **同步结果汇报 (HTTP POST)**:
+    - 接口路径: `/api/sync/report`
+    - 请求体: `{"type": "ads|schedule", "status": "success|failed", "detail": "...", "timestamp": 123456789}`
+- **设备长连接 (WebSocket)**:
+    - 连接地址：`ws://<gateway-host>:<port>/ws?device_id=<ID>&token=<TOKEN>`
+    - 心跳包：`{"type": "heartbeat", "payload": "ping"}`
+    - 日志包：`{"type": "log", "payload": [ ... ]}`
+- **指令下发与回包（兼容两种风格）**:
   - 截图下发（二选一）：
     - `{"type":"snapshot_request","req_id":"<uuid>"}` 或
     - `{"type":"command","payload":"SNAPSHOT","cmd_id":"<uuid>"}`

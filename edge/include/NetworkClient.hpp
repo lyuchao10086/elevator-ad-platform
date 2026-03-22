@@ -51,6 +51,27 @@ public:
      */
     void stopGatewayConnection();
 
+    /**
+     * @brief 从网关拉取最新广告素材数据
+     * @return json 广告数据
+     */
+    json fetchAds();
+
+    /**
+     * @brief 从网关拉取最新排期策略数据
+     * @return json 排期数据
+     */
+    json fetchSchedule();
+
+    /**
+     * @brief 向网关汇报同步结果
+     * @param type 同步类型 ("ads" 或 "schedule")
+     * @param status 状态 ("success" 或 "failed")
+     * @param detail 详细信息
+     * @return true 汇报成功
+     */
+    bool reportSyncResult(const std::string& type, const std::string& status, const std::string& detail);
+
 private:
     std::string apiUrl_;
 
