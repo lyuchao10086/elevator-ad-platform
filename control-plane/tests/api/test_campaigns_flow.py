@@ -1,4 +1,5 @@
 from app.api.v1.endpoints import campaigns as campaigns_ep
+from app.api.v1.endpoints import gateway as gateway_ep
 from app.core.config import settings
 
 
@@ -97,6 +98,113 @@ def test_get_schedule_config_returns_pure_json(client):
     assert "playlist" in body
     assert isinstance(body["playlist"], list)
     assert "campaign_id" not in body
+
+
+def test_gateway_device_schedule_returns_published_schedule_config(client, monkeypatch):
+    campaign_id = _create_campaign(client)
+    campaigns_ep._CAMPAIGN_STORE[campaign_id]["status"] = "published"
+
+    monkeypatch.setattr(
+        campaigns_ep.db_service,
+        "get_latest_published_campaign_for_device",
+        lambda *_args, **_kwargs: None,
+        raising=False,
+    )
+
+    resp = client.get("/api/v1/gateway/devices/dev_001/schedule")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["type"] == "schedule_update"
+    assert body["version"]
+    assert "playlist" in body
+    assert body["playlist"][0]["id"] == "ad_101"
+
+
+def test_gateway_device_schedule_supports_edge_format(client, monkeypatch):
+    campaign_id = _create_campaign(client)
+    campaigns_ep._CAMPAIGN_STORE[campaign_id]["status"] = "published"
+
+    monkeypatch.setattr(
+        campaigns_ep.db_service,
+        "get_latest_published_campaign_for_device",
+        lambda *_args, **_kwargs: None,
+        raising=False,
+    )
+
+    resp = client.get("/api/v1/gateway/devices/dev_001/schedule?format=edge-schedule")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["policy_id"].startswith("POL_SH_")
+    assert "time_slots" in body
+    assert body["time_slots"][-1]["slot_id"] == 99
+
+
+def test_gateway_device_bundle_returns_schedule_and_assets(client, monkeypatch):
+    campaign_id = _create_campaign(client)
+    campaigns_ep._CAMPAIGN_STORE[campaign_id]["status"] = "published"
+
+    monkeypatch.setattr(
+        campaigns_ep.db_service,
+        "get_latest_published_campaign_for_device",
+        lambda *_args, **_kwargs: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        gateway_ep.db_service,
+        "list_materials",
+        lambda **_kwargs: [
+            {
+                "material_id": "mat_001",
+                "ad_id": "ad_101",
+                "file_name": "coke_cny.mp4",
+                "md5": "a1b2c3",
+                "type": "video",
+                "duration_sec": 15,
+                "size_bytes": 2048,
+                "status": "ready",
+            }
+        ],
+        raising=False,
+    )
+
+    resp = client.get("/api/v1/gateway/devices/dev_001/bundle")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["device_id"] == "dev_001"
+    assert body["schedule"]["type"] == "schedule_update"
+    assert body["schedule_config"]["type"] == "schedule_update"
+    assert body["edge_schedule"]["policy_id"].startswith("POL_SH_")
+    assert len(body["assets"]) == 1
+    assert body["assets"][0]["material_id"] == "mat_001"
+    assert body["assets"][0]["download_url"].endswith("/api/v1/gateway/materials/mat_001/file")
+    assert body["assets"][0]["source_url"].endswith("/coke_cny.mp4")
+
+
+def test_gateway_material_metadata_by_ad_id_returns_download_url(client, monkeypatch):
+    monkeypatch.setattr(
+        gateway_ep.db_service,
+        "list_materials",
+        lambda **_kwargs: [
+            {
+                "material_id": "mat_001",
+                "ad_id": "ad_101",
+                "file_name": "coke_cny.mp4",
+                "md5": "a1b2c3",
+                "type": "video",
+                "duration_sec": 15,
+                "size_bytes": 2048,
+                "status": "ready",
+            }
+        ],
+        raising=False,
+    )
+
+    resp = client.get("/api/v1/gateway/materials/by-ad/ad_101")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["material_id"] == "mat_001"
+    assert body["ad_id"] == "ad_101"
+    assert body["download_url"].endswith("/api/v1/gateway/materials/mat_001/file")
 
 
 def test_get_edge_schedule_returns_terminal_shape(client):
