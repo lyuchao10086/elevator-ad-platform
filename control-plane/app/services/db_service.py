@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
@@ -550,6 +551,32 @@ def get_campaign(campaign_id: str):
         cur.execute(sql, [campaign_id])
         row = cur.fetchone()
         return row
+    finally:
+        conn.close()
+
+
+def get_latest_published_campaign_for_device(device_id: str):
+    """
+    Return the latest published campaign targeting the given device.
+
+    The current implementation derives device-level strategy from campaign
+    rows directly. A dedicated device-campaign binding table can replace this
+    lookup later without changing the API contract.
+    """
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        ensure_campaign_tables(cur)
+        sql = """
+            SELECT *
+            FROM campaigns
+            WHERE status = 'published'
+              AND COALESCE(target_device_groups, '[]'::jsonb) @> %s::jsonb
+            ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+            LIMIT 1
+        """
+        cur.execute(sql, [json.dumps([device_id])])
+        return cur.fetchone()
     finally:
         conn.close()
 
