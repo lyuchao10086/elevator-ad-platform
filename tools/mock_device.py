@@ -57,9 +57,12 @@ def simulate_elevator(device_id, token): # 增加 token 参数
     
     current_policy = None
     print(f"[{device_id}] 🌐 正在向云端请求播放策略...")
+    gateway_api = f"http://127.0.0.1:8080/api/v1/device/policy?device_id={device_id}"
     try:
         # 向刚才在 devices.py 里写的接口要数据 (注意端口 8000 和前缀 /api/v1/devices)
-        res = requests.get(f"http://127.0.0.1:8000/api/v1/devices/{device_id}/policy", timeout=5)
+        print(f"[*] 正在向【Go网关】请求策略...")
+        res = requests.get(gateway_api, timeout=5)
+        # res = requests.get(f"http://127.0.0.1:8000/api/v1/devices/{device_id}/policy", timeout=5)
         cloud_policy = res.json()
         print(f"[{device_id}] ✅ 获取策略成功！版本号: {cloud_policy.get('version')}")
         

@@ -425,3 +425,28 @@ func getClientIP(r *http.Request) string {
 	}
 	return host
 }
+
+// Handler 结构体中需要实现这个方法
+func (h *Handler) GetDevicePolicy(w http.ResponseWriter, r *http.Request) {
+	deviceID := r.URL.Query().Get("device_id")
+	if deviceID == "" {
+		http.Error(w, "Missing device_id", http.StatusBadRequest)
+		return
+	}
+
+	// 模拟从数据库或配置中读取策略
+	// 这里的 URL 已经改成了网关自己的地址 (8080)
+	policy := map[string]interface{}{
+		"version": "2026031201",
+		"playlist": []map[string]string{
+			{
+				"ad_id": "AD_TEST_001",
+				"url":   "http://127.0.0.1:8080/static/mock.jpg", // 指向网关自己
+				"md5":   "test_md5_123",
+			},
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(policy)
+}

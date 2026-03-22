@@ -49,6 +49,18 @@ func main() {
 	http.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "dashboard.html")
 	})
+	// 1. 创建一个文件服务器，指向你的 storage 目录
+	// 注意：这里的路径要指向你 control-plane/storage 的实际位置
+	fileServer := http.FileServer(http.Dir("../control-plane/storage/materials"))
+
+	// 2. 注册获取素材的 API (端侧通过 http://网关IP:8080/static/mock.jpg 访问)
+	// StripPrefix 的作用是去掉 URL 里的 /static/，直接去文件夹里找文件
+	http.Handle("/static/", http.StripPrefix("/static/", fileServer))
+
+	// 3. 注册获取策略的 API
+	// 这里的 h 是你的 Handler 实例
+	http.HandleFunc("/api/v1/device/policy", handler.GetDevicePolicy)
+
 	log.Println("网关启动在 :8080")
 	http.ListenAndServe(":8080", nil) //实现websocket/HTTP监听功能
 
