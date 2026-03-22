@@ -135,3 +135,21 @@ def list_registered_devices():
         return {"items": items, "total": len(items)}
     except Exception as e:
         return {"items": [], "total": 0, "error": str(e)}
+
+# --- 【新增】离线缓存测试：下发播放策略接口 ---
+@router.get("/{device_id}/policy", summary="获取设备播放策略")
+def get_device_policy(device_id: str):
+    # 零基础测试：直接写死一个假策略返回给设备
+    # 实际项目中，这里应该去查数据库
+    return {
+        "version": "2026031201",  # 策略版本号
+        "playlist": [
+            {
+                "ad_id": "AD_TEST_001",
+                # 注意：这里的 127.0.0.1 是你 FastAPI 运行的地址
+                # 如果你在不同电脑测试，需要换成局域网 IP
+                "url": "http://127.0.0.1:8000/static/mock.jpg", 
+                "md5": "test_md5_123"
+            }
+        ]
+    }

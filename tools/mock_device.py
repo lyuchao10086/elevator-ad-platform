@@ -5,6 +5,8 @@ import threading
 import random
 import base64
 import uuid
+import requests # 【新增引入】如果提示找不到，请在终端运行 pip install requests
+import hashlib
 
 # 配置信息
 GATEWAY_URL = "ws://127.0.0.1:8080/ws"
@@ -46,7 +48,61 @@ logs = [
 ]
 def simulate_elevator(device_id, token): # 增加 token 参数
     """模拟单台电梯终端的逻辑"""
+    # ================= 【新增：缓存与下载逻辑】 =================
+    # 1. 为每个设备建一个专属的缓存文件夹
+    cache_dir = f"./device_cache_{device_id}"
+    import os
+    os.makedirs(cache_dir, exist_ok=True)
+    policy_file = os.path.join(cache_dir, "local_policy.json")
     
+    current_policy = None
+    print(f"[{device_id}] 🌐 正在向云端请求播放策略...")
+    try:
+        # 向刚才在 devices.py 里写的接口要数据 (注意端口 8000 和前缀 /api/v1/devices)
+        res = requests.get(f"http://127.0.0.1:8000/api/v1/devices/{device_id}/policy", timeout=5)
+        cloud_policy = res.json()
+        print(f"[{device_id}] ✅ 获取策略成功！版本号: {cloud_policy.get('version')}")
+        
+        # 2. 检查视频，如果没有就下载
+        updated_playlist = []
+        for item in cloud_policy.get('playlist', []):
+            url = item['url']
+            filename = url.split('/')[-1] # 提取文件名 test_video.mp4
+            local_path = os.path.join(cache_dir, filename)
+            
+            if not os.path.exists(local_path):
+                print(f"[{device_id}] ⬇️ 本地缺少 {filename}，开始下载...")
+                r = requests.get(url)
+                with open(local_path, "wb") as f:
+                    f.write(r.content)
+                print(f"[{device_id}] ⬇️ 下载完成！")
+            else:
+                print(f"[{device_id}] ⚡ 缓存命中！{filename} 已在本地，无需下载。")
+                
+            # 把本地路径记录到内存里，假装这就是我们要播的地址
+            item['local_path'] = os.path.abspath(local_path)
+            updated_playlist.append(item)
+            
+        cloud_policy['playlist'] = updated_playlist
+        
+        # 3. 把最新的规则保存到本地硬盘，防备下次断网
+        with open(policy_file, "w", encoding="utf-8") as f:
+            json.dump(cloud_policy, f, ensure_ascii=False, indent=2)
+        current_policy = cloud_policy
+
+    except Exception as e:
+        # 断网了！进入离线模式
+        print(f"[{device_id}] ❌ 无法连接云端 ({e})，进入【离线模式】！")
+        if os.path.exists(policy_file):
+            with open(policy_file, "r", encoding="utf-8") as f:
+                current_policy = json.load(f)
+            print(f"[{device_id}] 🔋 已成功加载本地离线缓存策略。")
+        else:
+            print(f"[{device_id}] ⚠️ 本地也没有缓存，电梯黑屏中...")
+
+    if current_policy:
+        print(f"[{device_id}] 🎬 最终决定播放的本地文件: {current_policy['playlist'][0]['local_path']}")
+    # ============================================================
     # 动态拼接：使用传入的 ID 和 Token，不要硬编码
     ws_url = f"{GATEWAY_URL}?device_id={device_id}&token={token}"
     

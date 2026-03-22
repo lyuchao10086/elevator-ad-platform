@@ -1,0 +1,11 @@
+{
+  "version": "2026031201",
+  "playlist": [
+    {
+      "ad_id": "AD_TEST_001",
+      "url": "http://127.0.0.1:8000/static/mock.jpg",
+      "md5": "test_md5_123",
+      "local_path": "E:\\User\\Github\\elevator-ad-platform\\tools\\device_cache_ELEV_010\\mock.jpg"
+    }
+  ]
+}
