@@ -61,7 +61,7 @@ public:
      * @return true 初始化成功
      * @return false 初始化失败 (如配置错误、数据库连接失败等)
      */
-    bool init(const std::string& configPath);
+    bool init(const std::string& configPath, bool isPlayerMode = false);
     
     /**
      * @brief 启动主运行循环
@@ -112,7 +112,7 @@ public:
      * @return true 成功
      * @return false 失败
      */
-    bool syncAds(const json& adsJson);
+    bool loadAds(const json& adsJson);
 
     /**
      * @brief 同步排期策略数据 (从文件)
@@ -131,7 +131,7 @@ public:
      * @return true 成功
      * @return false 失败
      */
-    bool syncSchedule(const json& scheduleJson);
+    bool loadSchedule(const json& scheduleJson);
 
     /**
      * @brief 获取下一个要播放的素材
@@ -218,6 +218,7 @@ private:
     std::unique_ptr<NetworkClient> network_; ///< 网络客户端实例指针
     int current_volume_ = 60;
     bool current_mute_ = false;
+    bool is_player_mode_ = false;
     std::atomic<bool> should_exit_{false};
     std::atomic<bool> should_soft_reboot_{false};
 
@@ -225,6 +226,14 @@ private:
     std::thread syncThread_;
     std::atomic<bool> syncRunning_{false};
     void syncLoop();
+
+    // 守护进程心跳线程
+    std::thread watchdogHeartbeatThread_;
+    void watchdogHeartbeatLoop();
+
+    // 守护进程命令监听线程
+    std::thread watchdogCommandThread_;
+    void watchdogCommandLoop();
 
     // 轮播索引 (用于 getNextAsset 轮询 timeslot 中的列表)
     size_t current_playlist_index_ = 0;

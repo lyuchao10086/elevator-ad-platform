@@ -950,4 +950,5 @@ CMakeFiles/edge.dir/src/main.cpp.o: \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__thread/this_thread.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__thread/thread.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/sstream \
-  /Users/lyuchao/Documents/trae_projects/edge/include/Log.hpp
+  /Users/lyuchao/Documents/trae_projects/edge/include/Log.hpp \
+  /Users/lyuchao/Documents/trae_projects/edge/include/Watchdog.hpp

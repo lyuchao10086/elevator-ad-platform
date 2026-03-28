@@ -225,6 +225,30 @@ src/VideoPlayer.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/edge.dir/build.make CMakeFiles/edge.dir/src/VideoPlayer.cpp.s
 .PHONY : src/VideoPlayer.cpp.s
 
+src/Watchdog.o: src/Watchdog.cpp.o
+.PHONY : src/Watchdog.o
+
+# target to build an object file
+src/Watchdog.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/edge.dir/build.make CMakeFiles/edge.dir/src/Watchdog.cpp.o
+.PHONY : src/Watchdog.cpp.o
+
+src/Watchdog.i: src/Watchdog.cpp.i
+.PHONY : src/Watchdog.i
+
+# target to preprocess a source file
+src/Watchdog.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/edge.dir/build.make CMakeFiles/edge.dir/src/Watchdog.cpp.i
+.PHONY : src/Watchdog.cpp.i
+
+src/Watchdog.s: src/Watchdog.cpp.s
+.PHONY : src/Watchdog.s
+
+# target to generate assembly for a file
+src/Watchdog.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/edge.dir/build.make CMakeFiles/edge.dir/src/Watchdog.cpp.s
+.PHONY : src/Watchdog.cpp.s
+
 src/main.o: src/main.cpp.o
 .PHONY : src/main.o
 
@@ -270,6 +294,9 @@ help:
 	@echo "... src/VideoPlayer.o"
 	@echo "... src/VideoPlayer.i"
 	@echo "... src/VideoPlayer.s"
+	@echo "... src/Watchdog.o"
+	@echo "... src/Watchdog.i"
+	@echo "... src/Watchdog.s"
 	@echo "... src/main.o"
 	@echo "... src/main.i"
 	@echo "... src/main.s"

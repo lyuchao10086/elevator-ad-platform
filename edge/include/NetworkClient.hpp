@@ -22,8 +22,10 @@ public:
     /**
      * @brief 构造函数
      * @param apiUrl 云端 API 基础地址 (例如 http://127.0.0.1:8080/api)
+     * @param deviceId 设备 ID
+     * @param token 认证 Token
      */
-    explicit NetworkClient(const std::string& apiUrl);
+    explicit NetworkClient(const std::string& apiUrl, const std::string& deviceId = "", const std::string& token = "");
 
     ~NetworkClient();
 
@@ -74,6 +76,8 @@ public:
 
 private:
     std::string apiUrl_;
+    std::string deviceId_;
+    std::string token_;
 
     std::thread wsThread_;
     std::atomic<bool> wsRunning_;

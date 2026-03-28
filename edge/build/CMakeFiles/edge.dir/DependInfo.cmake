@@ -12,6 +12,7 @@ set(CMAKE_DEPENDS_DEPENDENCY_FILES
   "/Users/lyuchao/Documents/trae_projects/edge/src/EdgeManager.cpp" "CMakeFiles/edge.dir/src/EdgeManager.cpp.o" "gcc" "CMakeFiles/edge.dir/src/EdgeManager.cpp.o.d"
   "/Users/lyuchao/Documents/trae_projects/edge/src/NetworkClient.cpp" "CMakeFiles/edge.dir/src/NetworkClient.cpp.o" "gcc" "CMakeFiles/edge.dir/src/NetworkClient.cpp.o.d"
   "/Users/lyuchao/Documents/trae_projects/edge/src/VideoPlayer.cpp" "CMakeFiles/edge.dir/src/VideoPlayer.cpp.o" "gcc" "CMakeFiles/edge.dir/src/VideoPlayer.cpp.o.d"
+  "/Users/lyuchao/Documents/trae_projects/edge/src/Watchdog.cpp" "CMakeFiles/edge.dir/src/Watchdog.cpp.o" "gcc" "CMakeFiles/edge.dir/src/Watchdog.cpp.o.d"
   "/Users/lyuchao/Documents/trae_projects/edge/src/main.cpp" "CMakeFiles/edge.dir/src/main.cpp.o" "gcc" "CMakeFiles/edge.dir/src/main.cpp.o.d"
   )
 

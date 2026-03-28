@@ -17,8 +17,13 @@
 #include <ifaddrs.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <unistd.h>
 #endif
 
+/**
+ * @brief Base64 编码辅助函数
+ * 用于将截图二进制数据转换为 Base64 字符串
+ */
 static std::string b64encode(const std::vector<uint8_t>& in) {
     static const char* tbl = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string out;
@@ -46,6 +51,7 @@ static std::string b64encode(const std::vector<uint8_t>& in) {
     }
     return out;
 }
+
 void EdgeManager::handleCloudCommand(const json& msg, std::function<void(const json&)> send) {
     bool is_snapshot = (msg.contains("type") && msg["type"] == "snapshot_request") ||
         (msg.contains("type") && msg["type"] == "command" && msg.contains("payload") && msg["payload"] == "SNAPSHOT");
@@ -130,6 +136,16 @@ EdgeManager::~EdgeManager() {
         syncThread_.join();
     }
 
+    // 停止心跳线程
+    if (watchdogHeartbeatThread_.joinable()) {
+        watchdogHeartbeatThread_.join();
+    }
+
+    // 停止命令线程
+    if (watchdogCommandThread_.joinable()) {
+        watchdogCommandThread_.join();
+    }
+
     // 停止网络客户端
     if (network_) {
         network_->stopGatewayConnection();
@@ -141,13 +157,14 @@ EdgeManager::~EdgeManager() {
     SDL_Quit();
 }
 
-bool EdgeManager::init(const std::string& configPath) {
+bool EdgeManager::init(const std::string& configPath, bool isPlayerMode) {
     if (is_initialized_) {
         printInfo(LogLevel::WARNING, "EdgeManager 已经初始化过了");
         return true;
     }
 
-    printInfo(LogLevel::INFO, "正在初始化 EdgeManager...");
+    is_player_mode_ = isPlayerMode;
+    printInfo(LogLevel::INFO, "正在初始化 EdgeManager (模式: " + std::string(is_player_mode_ ? "播放器" : "单机") + ")...");
 
     // 1. 加载配置文件
     if (!loadConfig(configPath)) {
@@ -163,7 +180,7 @@ bool EdgeManager::init(const std::string& configPath) {
 
     // 3. 初始化网络客户端 (必须在同步数据之前，因为同步现在依赖网络)
     if (!config_.gateway_ws_url.empty()) {
-        network_ = std::make_unique<NetworkClient>(config_.gateway_ws_url);
+        network_ = std::make_unique<NetworkClient>(config_.gateway_ws_url, config_.device_id, config_.token);
     }
 
     // 4. 加载广告素材数据
@@ -190,8 +207,8 @@ bool EdgeManager::init(const std::string& configPath) {
         printInfo(LogLevel::WARNING, "播放列表初始化存在问题");
     }
 
-    // 8. 启动网络连接 (WebSocket 长连接)
-    if (network_ && !config_.gateway_ws_url.empty() && !config_.device_id.empty()) {
+    // 8. 启动网络连接 (WebSocket 长连接) - 仅在非播放器模式下启动（播放器模式由守护进程负责心跳）
+    if (!is_player_mode_ && network_ && !config_.gateway_ws_url.empty() && !config_.device_id.empty()) {
         // 读取上报间隔
         int interval = 10;
         try {
@@ -214,10 +231,18 @@ bool EdgeManager::init(const std::string& configPath) {
         );
     }
 
-    // 9. 检查并清理存储空间
+    // 9. 启动本地心跳发送 (播放器模式下)
+    if (is_player_mode_) {
+        printInfo(LogLevel::INFO, "启动本地心跳发送线程 (UDP: 9999)");
+        watchdogHeartbeatThread_ = std::thread(&EdgeManager::watchdogHeartbeatLoop, this);
+        printInfo(LogLevel::INFO, "启动本地命令接收线程 (UDP: 9998)");
+        watchdogCommandThread_ = std::thread(&EdgeManager::watchdogCommandLoop, this);
+    }
+
+    // 10. 检查并清理存储空间
     cleanupStorage();
 
-    // 10. 启动定时同步线程
+    // 11. 启动定时同步线程
     syncRunning_ = true;
     syncThread_ = std::thread(&EdgeManager::syncLoop, this);
 
@@ -1052,7 +1077,7 @@ bool EdgeManager::syncAds() {
     printInfo(LogLevel::INFO, "正在从网关拉取最新广告...");
     json ads = network_->fetchAds();
     if (!ads.is_null() && !ads.empty()) {
-        bool ok = syncAds(ads);
+        bool ok = loadAds(ads);
         network_->reportSyncResult("ads", ok ? "success" : "failed", ok ? "广告同步成功" : "广告解析入库失败");
         return ok;
     }
@@ -1060,7 +1085,7 @@ bool EdgeManager::syncAds() {
     return false;
 }
 
-bool EdgeManager::syncAds(const json& j) {
+bool EdgeManager::loadAds(const json& j) {
     try {
         if (!j.contains("ads")) {
             std::cerr << "Ads.json 格式错误: 缺少 'ads' 字段" << std::endl;
@@ -1104,7 +1129,7 @@ bool EdgeManager::syncSchedule() {
     printInfo(LogLevel::INFO, "正在从网关拉取最新排期...");
     json schedule = network_->fetchSchedule();
     if (!schedule.is_null() && !schedule.empty()) {
-        bool ok = syncSchedule(schedule);
+        bool ok = loadSchedule(schedule);
         network_->reportSyncResult("schedule", ok ? "success" : "failed", ok ? "排期同步成功" : "排期解析入库失败");
         return ok;
     }
@@ -1112,7 +1137,7 @@ bool EdgeManager::syncSchedule() {
     return false;
 }
 
-bool EdgeManager::syncSchedule(const json& j) {
+bool EdgeManager::loadSchedule(const json& j) {
     try {
         Schedule schedule = Schedule::fromJson(j);
         
@@ -1182,4 +1207,54 @@ void EdgeManager::syncLoop() {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
+}
+
+void EdgeManager::watchdogHeartbeatLoop() {
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) return;
+
+    struct sockaddr_in servaddr;
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_port = htons(WD_HEARTBEAT_PORT);
+    servaddr.sin_addr.s_addr = inet_addr(WD_LOCALHOST.c_str());
+
+    const char* hello = "HEARTBEAT";
+    while (!should_exit_) {
+        sendto(sockfd, hello, strlen(hello), 0, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+    }
+    close(sockfd);
+}
+
+void EdgeManager::watchdogCommandLoop() {
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) return;
+
+    struct sockaddr_in servaddr;
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_port = htons(WD_COMMAND_PORT);
+    servaddr.sin_addr.s_addr = INADDR_ANY;
+
+    if (bind(sockfd, (const struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
+        close(sockfd);
+        return;
+    }
+
+    char buffer[2048];
+    while (!should_exit_) {
+        struct sockaddr_in cliaddr;
+        socklen_t len = sizeof(cliaddr);
+        int n = recvfrom(sockfd, buffer, 2048, 0, (struct sockaddr *)&cliaddr, &len);
+        if (n > 0) {
+            try {
+                std::string msg(buffer, n);
+                json j = json::parse(msg);
+                handleCloudCommand(j, [sockfd, cliaddr, len](const json& reply) {
+                    std::string s = reply.dump();
+                    sendto(sockfd, s.c_str(), s.length(), 0, (const struct sockaddr *)&cliaddr, len);
+                });
+            } catch (...) {}
+        }
+    }
+    close(sockfd);
 }

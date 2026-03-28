@@ -4,6 +4,11 @@
 #include <string>
 #include "nlohmann/json.hpp"
 
+// --- 系统级常量 ---
+const int WD_HEARTBEAT_PORT = 9999;     // 守护进程心跳接收端口 (UDP)
+const int WD_COMMAND_PORT = 9998;       // 播放器命令接收端口 (UDP)
+const std::string WD_LOCALHOST = "127.0.0.1";
+
 using json = nlohmann::json;
 
 /**

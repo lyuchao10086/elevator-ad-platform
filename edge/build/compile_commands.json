@@ -28,5 +28,11 @@
   "command": "/usr/bin/clang++  -I/Users/lyuchao/Documents/trae_projects/edge/include -I/opt/homebrew/Cellar/sdl2/2.32.6/include -I/opt/homebrew/include -isystem /opt/homebrew/Cellar/ffmpeg/7.1.1_2/include -isystem /opt/homebrew/Cellar/sdl2/2.32.6/include/SDL2 -g -std=gnu++17 -arch arm64 -o CMakeFiles/edge.dir/src/NetworkClient.cpp.o -c /Users/lyuchao/Documents/trae_projects/edge/src/NetworkClient.cpp",
   "file": "/Users/lyuchao/Documents/trae_projects/edge/src/NetworkClient.cpp",
   "output": "CMakeFiles/edge.dir/src/NetworkClient.cpp.o"
+},
+{
+  "directory": "/Users/lyuchao/Documents/trae_projects/edge/build",
+  "command": "/usr/bin/clang++  -I/Users/lyuchao/Documents/trae_projects/edge/include -I/opt/homebrew/Cellar/sdl2/2.32.6/include -I/opt/homebrew/include -isystem /opt/homebrew/Cellar/ffmpeg/7.1.1_2/include -isystem /opt/homebrew/Cellar/sdl2/2.32.6/include/SDL2 -g -std=gnu++17 -arch arm64 -o CMakeFiles/edge.dir/src/Watchdog.cpp.o -c /Users/lyuchao/Documents/trae_projects/edge/src/Watchdog.cpp",
+  "file": "/Users/lyuchao/Documents/trae_projects/edge/src/Watchdog.cpp",
+  "output": "CMakeFiles/edge.dir/src/Watchdog.cpp.o"
 }
 ]

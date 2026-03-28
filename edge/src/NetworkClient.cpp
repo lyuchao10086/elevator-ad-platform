@@ -3,8 +3,8 @@
 #include <iostream>
 #include <chrono>
 
-NetworkClient::NetworkClient(const std::string& apiUrl) 
-    : apiUrl_(apiUrl), wsRunning_(false) {
+NetworkClient::NetworkClient(const std::string& apiUrl, const std::string& deviceId, const std::string& token) 
+    : apiUrl_(apiUrl), deviceId_(deviceId), token_(token), wsRunning_(false) {
 }
 
 NetworkClient::~NetworkClient() {
@@ -156,7 +156,13 @@ void NetworkClient::wsLoop(std::string wsUrl, std::string deviceId, std::string 
 json NetworkClient::fetchAds() {
     try {
         httplib::Client cli(apiUrl_);
-        auto res = cli.Get("/api/ads"); // 假设网关提供 /api/ads 接口
+        std::string path = "/api/ads";
+        if (!deviceId_.empty()) {
+            path += (path.find('?') == std::string::npos ? "?" : "&");
+            path += "device_id=" + deviceId_ + "&token=" + token_;
+        }
+        
+        auto res = cli.Get(path.c_str()); 
         if (res && res->status == 200) {
             std::cout << "[NetworkClient] 获取广告数据成功" << std::endl;
             return json::parse(res->body);
@@ -172,7 +178,13 @@ json NetworkClient::fetchAds() {
 json NetworkClient::fetchSchedule() {
     try {
         httplib::Client cli(apiUrl_);
-        auto res = cli.Get("/api/schedule"); // 假设网关提供 /api/schedule 接口
+        std::string path = "/api/schedule";
+        if (!deviceId_.empty()) {
+            path += (path.find('?') == std::string::npos ? "?" : "&");
+            path += "device_id=" + deviceId_ + "&token=" + token_;
+        }
+        
+        auto res = cli.Get(path.c_str()); 
         if (res && res->status == 200) {
             std::cout << "[NetworkClient] 获取排期数据成功" << std::endl;
             return json::parse(res->body);
@@ -189,12 +201,18 @@ bool NetworkClient::reportSyncResult(const std::string& type, const std::string&
     try {
         httplib::Client cli(apiUrl_);
         json payload;
+        payload["device_id"] = deviceId_;
         payload["type"] = type;
         payload["status"] = status;
         payload["detail"] = detail;
         payload["timestamp"] = std::time(nullptr);
 
-        auto res = cli.Post("/api/sync/report", payload.dump(), "application/json");
+        std::string path = "/api/sync/report";
+        if (!token_.empty()) {
+            path += "?token=" + token_;
+        }
+
+        auto res = cli.Post(path.c_str(), payload.dump(), "application/json");
         if (res && res->status == 200) {
             std::cout << "[NetworkClient] 同步结果汇报成功: " << type << " - " << status << std::endl;
             return true;

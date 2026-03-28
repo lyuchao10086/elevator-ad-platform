@@ -31,6 +31,7 @@ add_executable(edge
     src/EdgeManager.cpp 
     src/VideoPlayer.cpp
     src/NetworkClient.cpp
+    src/Watchdog.cpp
 )
 
 # 包含头文件路径
