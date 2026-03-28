@@ -159,6 +159,9 @@ def _build_asset_item(
         )
         file_exists = bool(get_material_file_path(material_id))
 
+    extra = (material_row or {}).get("extra") or {}
+    signed_source_url = extra.get("signed_oss_url") or extra.get("signed_url")
+
     return {
         "id": ad_id,
         "material_id": material_id,
@@ -175,6 +178,7 @@ def _build_asset_item(
         "download_url": download_url,
         "metadata_url": metadata_url,
         "source_url": _resolve_material_source_url(material_row, playlist_item, schedule_json),
+        "signed_source_url": signed_source_url,
     }
 
 

@@ -2,9 +2,42 @@
 #include "httplib.h"
 #include <iostream>
 #include <chrono>
+#include <fstream>
+#include <filesystem>
+
+namespace {
+
+std::string normalizeHttpBase(const std::string& rawUrl) {
+    if (rawUrl.empty()) {
+        return rawUrl;
+    }
+
+    std::string url = rawUrl;
+    if (url.rfind("ws://", 0) == 0) {
+        url = "http://" + url.substr(5);
+    } else if (url.rfind("wss://", 0) == 0) {
+        url = "https://" + url.substr(6);
+    }
+
+    auto schemePos = url.find("://");
+    if (schemePos == std::string::npos) {
+        return url;
+    }
+
+    auto hostStart = schemePos + 3;
+    auto pathPos = url.find('/', hostStart);
+    if (pathPos == std::string::npos) {
+        return url;
+    }
+
+    return url.substr(0, pathPos);
+}
+
+}
 
 NetworkClient::NetworkClient(const std::string& apiUrl, const std::string& deviceId, const std::string& token) 
-    : apiUrl_(apiUrl), deviceId_(deviceId), token_(token), wsRunning_(false) {
+    : apiUrl_(normalizeHttpBase(apiUrl)), deviceId_(deviceId), token_(token), wsRunning_(false) {
+    std::cout << "[NetworkClient] HTTP 基地址: " << apiUrl_ << std::endl;
 }
 
 NetworkClient::~NetworkClient() {
@@ -195,6 +228,70 @@ json NetworkClient::fetchSchedule() {
         std::cerr << "[NetworkClient] 获取排期数据异常: " << e.what() << std::endl;
     }
     return json::object();
+}
+
+bool NetworkClient::downloadAdFile(const std::string& adId, const std::string& filename, const std::string& savePath) {
+    if ((adId.empty() && filename.empty()) || savePath.empty()) {
+        return false;
+    }
+
+    try {
+        std::filesystem::path p(savePath);
+        auto parent = p.parent_path();
+        if (!parent.empty()) {
+            std::filesystem::create_directories(parent);
+        }
+
+        httplib::Client cli(apiUrl_);
+
+        auto doDownload = [&](const std::string& path, const std::string& tag) -> bool {
+            auto res = cli.Get(path.c_str());
+            if (!res || res->status != 200) {
+                std::cerr << "[NetworkClient] 下载素材失败(" << tag << ") status="
+                          << (res ? std::to_string(res->status) : "无法连接") << std::endl;
+                return false;
+            }
+
+            std::ofstream ofs(savePath, std::ios::binary);
+            if (!ofs.is_open()) {
+                std::cerr << "[NetworkClient] 无法写入素材文件: " << savePath << std::endl;
+                return false;
+            }
+            ofs.write(res->body.data(), static_cast<std::streamsize>(res->body.size()));
+            ofs.close();
+            return true;
+        };
+
+        bool ok = false;
+
+        if (!adId.empty()) {
+            std::string path = "/api/material/file?device_id=" + deviceId_ + "&ad_id=" + adId;
+            if (!token_.empty()) {
+                path += "&token=" + token_;
+            }
+            ok = doDownload(path, "ad_id=" + adId);
+        }
+
+        if (!ok && !filename.empty()) {
+            std::string path = "/api/material/file?device_id=" + deviceId_ + "&filename=" + filename;
+            if (!token_.empty()) {
+                path += "&token=" + token_;
+            }
+            ok = doDownload(path, "filename=" + filename);
+        }
+
+        if (!ok) {
+            return false;
+        }
+
+        std::cout << "[NetworkClient] 素材下载成功 ad_id=" << adId << " filename=" << filename
+                  << " -> " << savePath << std::endl;
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "[NetworkClient] 下载素材异常 ad_id=" << adId << " filename=" << filename
+                  << " err=" << e.what() << std::endl;
+        return false;
+    }
 }
 
 bool NetworkClient::reportSyncResult(const std::string& type, const std::string& status, const std::string& detail) {

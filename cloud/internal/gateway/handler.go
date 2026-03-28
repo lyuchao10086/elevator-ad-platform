@@ -5,9 +5,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +27,18 @@ type Handler struct {
 	upgrader websocket.Upgrader // 用于将普通的 HTTP 协议升级为 WebSocket 协议
 	bucket   *oss.Bucket
 	kafka    *KafkaProducer // ⭐ 新增
+}
+
+type deviceBundle struct {
+	DeviceID     string                   `json:"device_id"`
+	CampaignID   string                   `json:"campaign_id"`
+	Version      string                   `json:"version"`
+	GeneratedAt  string                   `json:"generated_at"`
+	Schedule     map[string]interface{}   `json:"schedule"`
+	ScheduleCfg  map[string]interface{}   `json:"schedule_config"`
+	EdgeSchedule map[string]interface{}   `json:"edge_schedule"`
+	Assets       []map[string]interface{} `json:"assets"`
+	ScheduleFmt  string                   `json:"schedule_format"`
 }
 
 // NewHandler 是一个构造函数，方便 main.go 调用来创建一个新的处理器
@@ -428,25 +444,434 @@ func getClientIP(r *http.Request) string {
 
 // Handler 结构体中需要实现这个方法
 func (h *Handler) GetDevicePolicy(w http.ResponseWriter, r *http.Request) {
-	deviceID := r.URL.Query().Get("device_id")
-	if deviceID == "" {
-		http.Error(w, "Missing device_id", http.StatusBadRequest)
+	deviceID, ok := h.validateDeviceRequest(w, r)
+	if !ok {
+		return
+	}
+	bundle, err := h.getDeviceBundle(deviceID)
+	if err != nil {
+		http.Error(w, "Failed to load policy", http.StatusBadGateway)
 		return
 	}
 
-	// 模拟从数据库或配置中读取策略
-	// 这里的 URL 已经改成了网关自己的地址 (8080)
-	policy := map[string]interface{}{
-		"version": "2026031201",
-		"playlist": []map[string]string{
-			{
-				"ad_id": "AD_TEST_001",
-				"url":   "http://127.0.0.1:8080/static/mock.jpg", // 指向网关自己
-				"md5":   "test_md5_123",
-			},
-		},
+	policy := bundle.ScheduleCfg
+	if len(policy) == 0 {
+		policy = bundle.Schedule
+	}
+	if len(policy) == 0 {
+		policy = map[string]interface{}{
+			"version":    bundle.Version,
+			"playlist":   []map[string]interface{}{},
+			"interrupts": []map[string]interface{}{},
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(policy)
+}
+
+// GetSchedule 提供端侧兼容接口，返回 edge-schedule 结构
+func (h *Handler) GetSchedule(w http.ResponseWriter, r *http.Request) {
+	deviceID, ok := h.validateDeviceRequest(w, r)
+	if !ok {
+		return
+	}
+
+	bundle, err := h.getDeviceBundle(deviceID)
+	if err != nil {
+		http.Error(w, "Failed to load schedule", http.StatusBadGateway)
+		return
+	}
+
+	schedule := bundle.EdgeSchedule
+	if len(schedule) == 0 {
+		schedule = bundle.Schedule
+	}
+	if len(schedule) == 0 {
+		http.Error(w, "No schedule available", http.StatusNotFound)
+		return
+	}
+	schedule = normalizeScheduleForEdge(schedule)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(schedule)
+}
+
+func normalizeScheduleForEdge(schedule map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(schedule)+3)
+	for k, v := range schedule {
+		out[k] = v
+	}
+
+	if gcRaw, ok := out["global_config"].(map[string]interface{}); ok {
+		if _, exists := out["default_volume"]; !exists {
+			if v, ok := gcRaw["default_volume"]; ok {
+				out["default_volume"] = v
+			}
+		}
+		if _, exists := out["download_retry_count"]; !exists {
+			if v, ok := gcRaw["download_retry_count"]; ok {
+				out["download_retry_count"] = v
+			}
+		}
+		if _, exists := out["report_interval_sec"]; !exists {
+			if v, ok := gcRaw["report_interval_sec"]; ok {
+				out["report_interval_sec"] = v
+			}
+		}
+	}
+
+	if _, exists := out["default_volume"]; !exists {
+		out["default_volume"] = 60
+	}
+	if _, exists := out["download_retry_count"]; !exists {
+		out["download_retry_count"] = 3
+	}
+	if _, exists := out["report_interval_sec"]; !exists {
+		out["report_interval_sec"] = 60
+	}
+
+	return out
+}
+
+// GetAds 提供端侧兼容接口，返回 {"ads": [...]} 结构
+func (h *Handler) GetAds(w http.ResponseWriter, r *http.Request) {
+	deviceID, ok := h.validateDeviceRequest(w, r)
+	if !ok {
+		return
+	}
+
+	bundle, err := h.getDeviceBundle(deviceID)
+	if err != nil {
+		http.Error(w, "Failed to load ads", http.StatusBadGateway)
+		return
+	}
+
+	ads := make([]map[string]interface{}, 0, len(bundle.Assets))
+	for _, asset := range bundle.Assets {
+		adID, _ := asset["id"].(string)
+		t, _ := asset["type"].(string)
+		filename, _ := asset["filename"].(string)
+		md5, _ := asset["md5"].(string)
+		duration := toInt(asset["duration"])
+		bytes := toInt64(asset["size_bytes"])
+
+		if adID == "" || filename == "" {
+			continue
+		}
+
+		if _, err := h.ensureAssetCached(asset); err != nil {
+			log.Printf("[material][cache] failed ad_id=%s filename=%s err=%v", adID, filename, err)
+		}
+
+		ads = append(ads, map[string]interface{}{
+			"ad_id":    adID,
+			"type":     t,
+			"filename": filename,
+			"md5":      md5,
+			"duration": duration,
+			"bytes":    bytes,
+			"url":      fmt.Sprintf("/api/material/file?device_id=%s&ad_id=%s", deviceID, adID),
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"version": bundle.Version,
+		"ads":     ads,
+	})
+}
+
+// GetMaterialFile 提供素材文件下载接口，未命中本地缓存时会回源 control-plane 拉取后再返回
+func (h *Handler) GetMaterialFile(w http.ResponseWriter, r *http.Request) {
+	deviceID, ok := h.validateDeviceRequest(w, r)
+	if !ok {
+		return
+	}
+
+	adID := strings.TrimSpace(r.URL.Query().Get("ad_id"))
+	filename := strings.TrimSpace(r.URL.Query().Get("filename"))
+	if adID == "" && filename == "" {
+		http.Error(w, "Missing ad_id or filename", http.StatusBadRequest)
+		return
+	}
+
+	bundle, err := h.getDeviceBundle(deviceID)
+	if err != nil {
+		http.Error(w, "Failed to load bundle", http.StatusBadGateway)
+		return
+	}
+
+	var found map[string]interface{}
+	for _, asset := range bundle.Assets {
+		curAdID, _ := asset["id"].(string)
+		curFilename, _ := asset["filename"].(string)
+		if (adID != "" && curAdID == adID) || (filename != "" && curFilename == filename) {
+			found = asset
+			break
+		}
+	}
+	if found == nil {
+		http.Error(w, "Material not found in device bundle", http.StatusNotFound)
+		return
+	}
+
+	localPath, err := h.ensureAssetCached(found)
+	if err != nil {
+		http.Error(w, "Failed to fetch material", http.StatusBadGateway)
+		return
+	}
+
+	serveName := filepath.Base(localPath)
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", serveName))
+	http.ServeFile(w, r, localPath)
+}
+
+func (h *Handler) extractDeviceID(r *http.Request) string {
+	deviceID := strings.TrimSpace(r.URL.Query().Get("device_id"))
+	if deviceID != "" {
+		return deviceID
+	}
+
+	deviceID = strings.TrimSpace(r.Header.Get("X-Device-ID"))
+	if deviceID != "" {
+		return deviceID
+	}
+
+	return ""
+}
+
+func (h *Handler) extractToken(r *http.Request) string {
+	token := strings.TrimSpace(r.URL.Query().Get("token"))
+	if token != "" {
+		return token
+	}
+
+	token = strings.TrimSpace(r.Header.Get("X-Device-Token"))
+	if token != "" {
+		return token
+	}
+
+	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
+		return strings.TrimSpace(auth[7:])
+	}
+
+	return ""
+}
+
+func (h *Handler) validateDeviceRequest(w http.ResponseWriter, r *http.Request) (string, bool) {
+	deviceID := h.extractDeviceID(r)
+	if deviceID == "" {
+		http.Error(w, "Missing device_id", http.StatusBadRequest)
+		return "", false
+	}
+	token := h.extractToken(r)
+	if !h.Manager.CheckAuth(deviceID, token) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return "", false
+	}
+	return deviceID, true
+}
+
+func gatewayMaterialCacheDir() string {
+	dir := strings.TrimSpace(os.Getenv("GATEWAY_MATERIAL_CACHE_DIR"))
+	if dir == "" {
+		dir = "storage/materials"
+	}
+	return dir
+}
+
+func fileExistsWithSize(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return !info.IsDir() && info.Size() > 0
+}
+
+func (h *Handler) ensureAssetCached(asset map[string]interface{}) (string, error) {
+	filename, _ := asset["filename"].(string)
+	filename = filepath.Base(strings.TrimSpace(filename))
+	if filename == "" {
+		return "", fmt.Errorf("asset missing filename")
+	}
+
+	cacheDir := gatewayMaterialCacheDir()
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return "", err
+	}
+
+	localPath := filepath.Join(cacheDir, filename)
+	if fileExistsWithSize(localPath) {
+		return localPath, nil
+	}
+
+	materialID, _ := asset["material_id"].(string)
+	downloadURL := ""
+
+	// Prefer upstream direct source URL (for OSS or CDN). Fallback to control-plane file API.
+	if u, _ := asset["signed_source_url"].(string); strings.TrimSpace(u) != "" {
+		downloadURL = strings.TrimSpace(u)
+	}
+	if downloadURL == "" {
+		u, _ := asset["source_url"].(string)
+		downloadURL = strings.TrimSpace(u)
+	}
+	if downloadURL == "" {
+		u, _ := asset["download_url"].(string)
+		downloadURL = strings.TrimSpace(u)
+	}
+	if downloadURL == "" && materialID != "" {
+		downloadURL = h.buildMaterialDownloadURL(materialID)
+	}
+	if downloadURL == "" {
+		return "", fmt.Errorf("asset missing download url")
+	}
+
+	if err := downloadFileToPath(downloadURL, localPath); err != nil {
+		return "", err
+	}
+
+	return localPath, nil
+}
+
+func (h *Handler) buildMaterialDownloadURL(materialID string) string {
+	baseURL := strings.TrimRight(getEnvWithDefault("CONTROL_PLANE_BASE_URL", "http://127.0.0.1:8000"), "/")
+	return fmt.Sprintf("%s/api/v1/gateway/materials/%s/file", baseURL, materialID)
+}
+
+func downloadFileToPath(url, dstPath string) error {
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download status: %d", resp.StatusCode)
+	}
+
+	tmpPath := dstPath + ".tmp"
+	f, err := os.Create(tmpPath)
+	if err != nil {
+		return err
+	}
+
+	if _, err = io.Copy(f, resp.Body); err != nil {
+		f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err = f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+
+	if err = os.Rename(tmpPath, dstPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+
+	return nil
+}
+
+func bundleCacheTTL() time.Duration {
+	v := strings.TrimSpace(os.Getenv("GATEWAY_BUNDLE_CACHE_TTL_SEC"))
+	if v == "" {
+		return 60 * time.Second
+	}
+	sec, err := strconv.Atoi(v)
+	if err != nil || sec <= 0 {
+		return 60 * time.Second
+	}
+	return time.Duration(sec) * time.Second
+}
+
+func bundleCacheKey(deviceID string) string {
+	return "device:bundle:" + deviceID
+}
+
+func (h *Handler) getDeviceBundle(deviceID string) (*deviceBundle, error) {
+	if h.Manager != nil && h.Manager.rdb != nil {
+		cached, err := h.Manager.rdb.Get(ctx, bundleCacheKey(deviceID)).Result()
+		if err == nil && cached != "" {
+			var b deviceBundle
+			if json.Unmarshal([]byte(cached), &b) == nil {
+				return &b, nil
+			}
+		}
+	}
+
+	b, raw, err := h.fetchBundleFromControlPlane(deviceID)
+	if err != nil {
+		return nil, err
+	}
+
+	if h.Manager != nil && h.Manager.rdb != nil {
+		h.Manager.rdb.Set(ctx, bundleCacheKey(deviceID), raw, bundleCacheTTL())
+	}
+
+	return b, nil
+}
+
+func (h *Handler) fetchBundleFromControlPlane(deviceID string) (*deviceBundle, []byte, error) {
+	baseURL := strings.TrimRight(getEnvWithDefault("CONTROL_PLANE_BASE_URL", "http://127.0.0.1:8000"), "/")
+	url := fmt.Sprintf("%s/api/v1/gateway/devices/%s/bundle", baseURL, deviceID)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, nil, fmt.Errorf("control-plane status: %d", resp.StatusCode)
+	}
+
+	var b deviceBundle
+	buf := new(bytes.Buffer)
+	if _, err := buf.ReadFrom(resp.Body); err != nil {
+		return nil, nil, err
+	}
+	if err := json.Unmarshal(buf.Bytes(), &b); err != nil {
+		return nil, nil, err
+	}
+
+	return &b, buf.Bytes(), nil
+}
+
+func toInt(v interface{}) int {
+	switch t := v.(type) {
+	case float64:
+		return int(t)
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case json.Number:
+		i, _ := t.Int64()
+		return int(i)
+	default:
+		return 0
+	}
+}
+
+func toInt64(v interface{}) int64 {
+	switch t := v.(type) {
+	case float64:
+		return int64(t)
+	case int:
+		return int64(t)
+	case int64:
+		return t
+	case json.Number:
+		i, _ := t.Int64()
+		return i
+	default:
+		return 0
+	}
 }

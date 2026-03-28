@@ -1109,6 +1109,14 @@ bool EdgeManager::loadAds(const json& j) {
                 + std::to_string(ad.getBytes()) + ", "
                 + "0);"; // last_played_time 默认为 0
             db_->execute(sql);
+
+            // 同步后确保素材文件落地到 resources/ads，供播放和完整性校验使用。
+            std::string filePath = config_.resources_dir + "ads/" + ad.getFilename();
+            if (!std::filesystem::exists(filePath)) {
+                if (!network_ || !network_->downloadAdFile(ad.getAdId(), ad.getFilename(), filePath)) {
+                    printInfo(LogLevel::WARNING, "素材下载失败: ad_id=" + ad.getAdId() + ", file=" + filePath);
+                }
+            }
         }
 
         db_->commit();

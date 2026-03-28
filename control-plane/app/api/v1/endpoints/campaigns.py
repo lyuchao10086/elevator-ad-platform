@@ -265,9 +265,15 @@ def _validate_publish_inputs(schedule_json: Dict[str, Any], target_devices: List
         if not isinstance(item, dict):
             errors.append(f"playlist[{idx}] is not an object")
             continue
-        for key in ("id", "file", "md5"):
-            if not item.get(key):
-                errors.append(f"playlist[{idx}] missing {key}")
+        if not item.get("id"):
+            errors.append(f"playlist[{idx}] missing id")
+
+        # In pull-mode, file/md5 can be resolved from materials metadata (e.g. OSS URL + file_name).
+        # Keep compatibility with legacy payloads by warning instead of blocking publish.
+        if not item.get("file"):
+            warnings.append(f"playlist[{idx}] missing file; will rely on material metadata")
+        if not item.get("md5"):
+            warnings.append(f"playlist[{idx}] missing md5; integrity check may be weaker")
         priority = item.get("priority")
         if not isinstance(priority, int) or not (1 <= priority <= 100):
             errors.append(f"playlist[{idx}] invalid priority: {priority}")

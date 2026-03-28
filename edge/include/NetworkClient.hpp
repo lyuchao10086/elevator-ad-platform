@@ -66,6 +66,14 @@ public:
     json fetchSchedule();
 
     /**
+     * @brief 从网关下载广告素材文件到本地
+     * @param adId 广告 ID
+     * @param savePath 本地保存路径
+     * @return true 下载并保存成功
+     */
+    bool downloadAdFile(const std::string& adId, const std::string& filename, const std::string& savePath);
+
+    /**
      * @brief 向网关汇报同步结果
      * @param type 同步类型 ("ads" 或 "schedule")
      * @param status 状态 ("success" 或 "failed")
