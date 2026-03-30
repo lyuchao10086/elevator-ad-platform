@@ -1,6 +1,18 @@
 #ifndef WATCHDOG_HPP
 #define WATCHDOG_HPP
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <windows.h>
+typedef DWORD pid_t;
+#else
+#include <unistd.h>
+#include <sys/types.h>
+#endif
+
 #include <string>
 #include <memory>
 #include <thread>
@@ -33,7 +45,11 @@ private:
     std::unique_ptr<NetworkClient> network_;
     
     std::atomic<bool> should_exit_{false};
-    pid_t player_pid_{-1};
+#ifdef _WIN32
+    std::atomic<DWORD> player_pid_{0};
+#else
+    std::atomic<pid_t> player_pid_{-1};
+#endif
     
     // 本地心跳监控
     std::atomic<long long> last_heartbeat_time_{0};

@@ -7,6 +7,13 @@
 #include <random>
 #include <iomanip>
 #include <sstream>
+
+#ifdef _WIN32
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+#define close closesocket
+typedef int socklen_t;
+#else
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -15,6 +22,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
+#endif
 
 Watchdog::Watchdog(const std::string& configPath, const std::string& exePath) 
     : configPath_(configPath), exePath_(exePath) {
@@ -47,8 +55,28 @@ bool Watchdog::loadConfig() {
 }
 
 void Watchdog::startPlayer() {
+#ifdef _WIN32
     if (player_pid_ > 0) return;
+#else
+    if (player_pid_ != -1) return;
+#endif
 
+#ifdef _WIN32
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    ZeroMemory(&pi, sizeof(pi));
+
+    std::string cmd = exePath_ + " --player " + configPath_;
+    if (!CreateProcessA(NULL, (char*)cmd.c_str(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+        std::cerr << "[Watchdog] 启动播放器进程失败: " << GetLastError() << std::endl;
+        return;
+    }
+    player_pid_ = pi.dwProcessId;
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+#else
     pid_t pid = fork();
     if (pid == 0) {
         // 子进程：播放器模式
@@ -65,14 +93,25 @@ void Watchdog::startPlayer() {
     } else {
         std::cerr << "[Watchdog] Fork 失败" << std::endl;
     }
+#endif
+    last_heartbeat_time_ = getCurrentTimestamp();
+    std::cout << "[Watchdog] 已启动播放器进程 (PID: " << player_pid_ << ")" << std::endl;
 }
 
 void Watchdog::stopPlayer() {
     if (player_pid_ > 0) {
         std::cout << "[Watchdog] 正在停止播放器进程 (PID: " << player_pid_ << ")" << std::endl;
+#ifdef _WIN32
+        HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, player_pid_);
+        if (hProcess) {
+            TerminateProcess(hProcess, 0);
+            CloseHandle(hProcess);
+        }
+#else
         kill(player_pid_, SIGTERM);
         int status;
         waitpid(player_pid_, &status, 0);
+#endif
         player_pid_ = -1;
     }
 }
@@ -131,6 +170,35 @@ void Watchdog::monitorLoop() {
 
         // 1. 检查进程是否还在
         if (player_pid_ > 0) {
+#ifdef _WIN32
+            HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, player_pid_);
+            if (hProcess) {
+                DWORD exitCode;
+                if (GetExitCodeProcess(hProcess, &exitCode)) {
+                    if (exitCode != STILL_ACTIVE) {
+                        std::cout << "[Watchdog] 播放器进程已退出 (ExitCode: " << exitCode << ")" << std::endl;
+                        logFault("CRASH", "播放器进程异常退出");
+                        player_pid_ = -1;
+                        startPlayer();
+                    } else {
+                        // 进程还在，检查心跳超时
+                        long long now = getCurrentTimestamp();
+                        if (now - last_heartbeat_time_ > 30) {
+                            std::cout << "[Watchdog] 播放器心跳超时 (30s)，强制重启" << std::endl;
+                            logFault("HANG", "播放器心跳超时");
+                            stopPlayer();
+                            startPlayer();
+                        }
+                    }
+                }
+                CloseHandle(hProcess);
+            } else {
+                // 无法打开进程，可能已经消失
+                logFault("CRASH", "播放器进程消失");
+                player_pid_ = -1;
+                startPlayer();
+            }
+#else
             int status;
             pid_t result = waitpid(player_pid_, &status, WNOHANG);
             if (result == -1) {
@@ -157,6 +225,7 @@ void Watchdog::monitorLoop() {
                     startPlayer();
                 }
             }
+#endif
         } else {
             startPlayer();
         }
@@ -164,8 +233,13 @@ void Watchdog::monitorLoop() {
 }
 
 void Watchdog::localHeartbeatServer() {
+#ifdef _WIN32
+    SOCKET sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd == INVALID_SOCKET) return;
+#else
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) return;
+#endif
 
     struct sockaddr_in servaddr;
     servaddr.sin_family = AF_INET;
@@ -225,12 +299,21 @@ void Watchdog::handleCloudCommand(const json& msg, std::function<void(const json
         // 转发指令到播放器 (UDP 9998)
         std::cout << "[Watchdog] 转发指令到播放器: " << type << " " << payload << std::endl;
         
+#ifdef _WIN32
+        SOCKET sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+        if (sockfd != INVALID_SOCKET) {
+#else
         int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
         if (sockfd >= 0) {
+#endif
             struct sockaddr_in servaddr;
             servaddr.sin_family = AF_INET;
             servaddr.sin_port = htons(9998);
+#ifdef _WIN32
             servaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+#else
+            servaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+#endif
 
             std::string s = msg.dump();
             sendto(sockfd, s.c_str(), s.length(), 0, (const struct sockaddr *)&servaddr, sizeof(servaddr));
