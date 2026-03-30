@@ -1153,6 +1153,11 @@ bool EdgeManager::loadSchedule(const json& j) {
 
         db_->beginTransaction();
 
+        // 单设备仅保留一套生效策略，避免历史策略残留导致混播。
+        db_->execute("DELETE FROM schedule_interrupt;");
+        db_->execute("DELETE FROM schedule_timeslot;");
+        db_->execute("DELETE FROM schedule;");
+
         // 1. 插入 schedule 表
         std::string scheduleSQL = "REPLACE INTO schedule (policy_id, effective_date, download_base_url, default_volume, download_retry_count, report_interval_sec) VALUES ('"
             + schedule.getPolicyId() + "', '"
@@ -1164,7 +1169,6 @@ bool EdgeManager::loadSchedule(const json& j) {
         db_->execute(scheduleSQL);
 
         // 2. 插入 schedule_interrupt 表
-        db_->execute("DELETE FROM schedule_interrupt WHERE policy_id = '" + schedule.getPolicyId() + "';");
         for (const auto& interrupt : schedule.getInterrupts()) {
             std::string interruptSQL = "INSERT INTO schedule_interrupt (policy_id, trigger_type, ad_id, priority, play_mode, status) VALUES ('"
                 + schedule.getPolicyId() + "', '"
@@ -1176,7 +1180,6 @@ bool EdgeManager::loadSchedule(const json& j) {
         }
 
         // 3. 插入 schedule_timeslot 表
-        db_->execute("DELETE FROM schedule_timeslot WHERE policy_id = '" + schedule.getPolicyId() + "';");
         for (const auto& slot : schedule.getTimeSlots()) {
             json playlistJson = slot.getPlaylist();
             std::string playlistStr = playlistJson.dump();

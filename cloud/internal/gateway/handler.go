@@ -155,6 +155,7 @@ func (h *Handler) DispatchMessage(deviceID string, conn *websocket.Conn) {
 		if err := conn.ReadJSON(&msg); err != nil {
 			// 如果读取失败（如客户端主动关闭或断网），直接跳出循环触发 defer
 			break
+
 		}
 
 		// --- 核心修改点：只要收到任何包，就刷新该设备在 Manager 里的活跃时间 ---
@@ -208,7 +209,6 @@ func (h *Handler) HandleCommand(w http.ResponseWriter, r *http.Request) {
 		Data     json.RawMessage `json:"data"`
 		CmdID    string          `json:"cmd_id"`
 	}
-
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Bad Request", 400)
 		return
@@ -255,7 +255,6 @@ func (h *Handler) handleLogReport(conn *websocket.Conn, payload json.RawMessage)
 	for i := range logs {
 		//获得日志设备ID
 		deviceID := logs[i].DeviceID
-		// 2️⃣ 网关补充字段(时间、IP)
 		logs[i].CreatedAt = time.Now().Unix()
 		logs[i].DeviceIP = h.Manager.GetDeviceIP(deviceID)
 
@@ -551,7 +550,7 @@ func (h *Handler) GetAds(w http.ResponseWriter, r *http.Request) {
 	for _, asset := range bundle.Assets {
 		adID, _ := asset["id"].(string)
 		t, _ := asset["type"].(string)
-		filename, _ := asset["filename"].(string)
+		filename := normalizeAssetFilename(asset)
 		md5, _ := asset["md5"].(string)
 		duration := toInt(asset["duration"])
 		bytes := toInt64(asset["size_bytes"])
@@ -559,6 +558,7 @@ func (h *Handler) GetAds(w http.ResponseWriter, r *http.Request) {
 		if adID == "" || filename == "" {
 			continue
 		}
+		asset["filename"] = filename
 
 		if _, err := h.ensureAssetCached(asset); err != nil {
 			log.Printf("[material][cache] failed ad_id=%s filename=%s err=%v", adID, filename, err)
@@ -605,7 +605,8 @@ func (h *Handler) GetMaterialFile(w http.ResponseWriter, r *http.Request) {
 	var found map[string]interface{}
 	for _, asset := range bundle.Assets {
 		curAdID, _ := asset["id"].(string)
-		curFilename, _ := asset["filename"].(string)
+		curFilename := normalizeAssetFilename(asset)
+		asset["filename"] = curFilename
 		if (adID != "" && curAdID == adID) || (filename != "" && curFilename == filename) {
 			found = asset
 			break
@@ -691,12 +692,55 @@ func fileExistsWithSize(path string) bool {
 	return !info.IsDir() && info.Size() > 0
 }
 
-func (h *Handler) ensureAssetCached(asset map[string]interface{}) (string, error) {
+func inferExtFromAssetURL(asset map[string]interface{}) string {
+	urlFields := []string{"signed_source_url", "source_url", "download_url"}
+	for _, field := range urlFields {
+		u, _ := asset[field].(string)
+		u = strings.TrimSpace(u)
+		if u == "" {
+			continue
+		}
+		base := filepath.Base(strings.SplitN(u, "?", 2)[0])
+		ext := strings.ToLower(strings.TrimSpace(filepath.Ext(base)))
+		if ext != "" {
+			return ext
+		}
+	}
+	return ""
+}
+
+func normalizeAssetFilename(asset map[string]interface{}) string {
 	filename, _ := asset["filename"].(string)
 	filename = filepath.Base(strings.TrimSpace(filename))
 	if filename == "" {
+		return ""
+	}
+
+	if ext := strings.ToLower(filepath.Ext(filename)); ext != "" {
+		return filename
+	}
+
+	if ext := inferExtFromAssetURL(asset); ext != "" {
+		return filename + ext
+	}
+
+	t, _ := asset["type"].(string)
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "video", "mp4", "mov", "avi", "mkv", "webm":
+		return filename + ".mp4"
+	case "image", "jpg", "jpeg", "png", "bmp", "gif", "webp":
+		return filename + ".jpg"
+	default:
+		return filename
+	}
+}
+
+func (h *Handler) ensureAssetCached(asset map[string]interface{}) (string, error) {
+	filename := normalizeAssetFilename(asset)
+	if filename == "" {
 		return "", fmt.Errorf("asset missing filename")
 	}
+	asset["filename"] = filename
 
 	cacheDir := gatewayMaterialCacheDir()
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {

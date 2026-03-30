@@ -135,8 +135,23 @@ struct VideoPlayer::Impl {
 
     void CreateSDLWindow(const std::string& title) {
         if (window) {
-            // 如果窗口已存在，只更新标题
+            // 如果窗口已存在，更新标题并确保纹理尺寸与当前媒体一致
             SetTitle(title);
+
+            if (renderer) {
+                int tex_w = 0;
+                int tex_h = 0;
+                Uint32 format = 0;
+                int access = 0;
+                bool need_recreate = true;
+                if (texture && SDL_QueryTexture(texture, &format, &access, &tex_w, &tex_h) == 0) {
+                    need_recreate = (tex_w != width || tex_h != height);
+                }
+
+                if (need_recreate) {
+                    CreateTexture();
+                }
+            }
             return;
         }
         
@@ -179,6 +194,10 @@ struct VideoPlayer::Impl {
     }
 
     void CreateTexture() {
+        if (!renderer) {
+            return;
+        }
+
         if (texture) {
             SDL_DestroyTexture(texture);
         }
