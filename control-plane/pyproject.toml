@@ -22,6 +22,7 @@ dependencies = [
   "redis>=5.0",
   "python-multipart>=0.0.9",
   "psycopg2-binary>=2.9",
+  "kafka-python>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -43,6 +44,7 @@ conda = [
   "redis>=5.0",
   "python-multipart>=0.0.9",
   "psycopg2>=2.9",
+  "kafka-python>=2.0.0",
 ]
 
 [tool.pytest.ini_options]

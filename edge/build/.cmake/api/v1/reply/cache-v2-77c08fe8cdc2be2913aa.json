@@ -2291,7 +2291,7 @@
 				}
 			],
 			"type" : "INTERNAL",
-			"value" : "REQUIRED;libavformat;libavcodec;libavutil;libswscale"
+			"value" : "REQUIRED;IMPORTED_TARGET;libavformat;libavcodec;libavutil;libswscale"
 		},
 		{
 			"name" : "__pkg_config_arguments_PC_SQLite3",

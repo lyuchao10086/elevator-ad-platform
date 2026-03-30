@@ -22,8 +22,10 @@ public:
     /**
      * @brief 构造函数
      * @param apiUrl 云端 API 基础地址 (例如 http://127.0.0.1:8080/api)
+     * @param deviceId 设备 ID
+     * @param token 认证 Token
      */
-    explicit NetworkClient(const std::string& apiUrl);
+    explicit NetworkClient(const std::string& apiUrl, const std::string& deviceId = "", const std::string& token = "");
 
     ~NetworkClient();
 
@@ -51,11 +53,43 @@ public:
      */
     void stopGatewayConnection();
 
+    /**
+     * @brief 从网关拉取最新广告素材数据
+     * @return json 广告数据
+     */
+    json fetchAds();
+
+    /**
+     * @brief 从网关拉取最新排期策略数据
+     * @return json 排期数据
+     */
+    json fetchSchedule();
+
+    /**
+     * @brief 从网关下载广告素材文件到本地
+     * @param adId 广告 ID
+     * @param savePath 本地保存路径
+     * @return true 下载并保存成功
+     */
+    bool downloadAdFile(const std::string& adId, const std::string& filename, const std::string& savePath);
+
+    /**
+     * @brief 向网关汇报同步结果
+     * @param type 同步类型 ("ads" 或 "schedule")
+     * @param status 状态 ("success" 或 "failed")
+     * @param detail 详细信息
+     * @return true 汇报成功
+     */
+    bool reportSyncResult(const std::string& type, const std::string& status, const std::string& detail);
+
 private:
     std::string apiUrl_;
+    std::string deviceId_;
+    std::string token_;
 
     std::thread wsThread_;
     std::atomic<bool> wsRunning_;
+    std::atomic<void*> currentWs_{nullptr}; // 记录当前的 WebSocket 客户端指针，用于在外部关闭
 
     // WebSocket 网关维护循环
     void wsLoop(std::string wsUrl, std::string deviceId, std::string token,

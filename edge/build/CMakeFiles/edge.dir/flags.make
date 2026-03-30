@@ -4,7 +4,7 @@
 # compile CXX with /usr/bin/clang++
 CXX_DEFINES = 
 
-CXX_INCLUDES = -I/Users/lyuchao/Documents/trae_projects/edge/include -I/opt/homebrew/Cellar/ffmpeg/7.1.1_2/include -I/opt/homebrew/Cellar/sdl2/2.32.6/include -I/opt/homebrew/include -isystem /opt/homebrew/Cellar/sdl2/2.32.6/include/SDL2
+CXX_INCLUDES = -I/Users/lyuchao/Documents/trae_projects/edge/include -I/opt/homebrew/Cellar/sdl2/2.32.6/include -I/opt/homebrew/include -isystem /opt/homebrew/Cellar/ffmpeg/7.1.1_2/include -isystem /opt/homebrew/Cellar/sdl2/2.32.6/include/SDL2
 
 CXX_FLAGSarm64 = -g -std=gnu++17 -arch arm64
 

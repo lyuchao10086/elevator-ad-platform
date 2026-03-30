@@ -19,7 +19,7 @@ find_package(SQLite3 REQUIRED)
 
 # 查找 FFmpeg 库
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(FFMPEG REQUIRED libavformat libavcodec libavutil libswscale)
+pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavformat libavcodec libavutil libswscale)
 
 # 查找 SDL2 库
 find_package(SDL2 CONFIG REQUIRED)
@@ -31,6 +31,7 @@ add_executable(edge
     src/EdgeManager.cpp 
     src/VideoPlayer.cpp
     src/NetworkClient.cpp
+    src/Watchdog.cpp
 )
 
 # 包含头文件路径
@@ -65,7 +66,7 @@ endif()
 # 链接库
 target_link_libraries(edge 
     SQLite::SQLite3
-    ${FFMPEG_LIBRARIES} 
+    PkgConfig::FFMPEG
     SDL2::SDL2
     SDL2::SDL2main
 )

@@ -13,29 +13,17 @@
 #include <filesystem>
 #include <random> // 增加 random 头文件
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <winsock2.h>
-#include <Ws2tcpip.h>
-#pragma comment(lib, "Ws2_32.lib")
-#ifdef CreateWindow
-#undef CreateWindow
-#endif
-#ifdef ERROR
-#undef ERROR
-#endif
-#ifdef WARNING
-#undef WARNING
-#endif
-#ifdef INFO
-#undef INFO
-#endif
 #else
 #include <ifaddrs.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <unistd.h>
 #endif
 
+/**
+ * @brief Base64 编码辅助函数
+ * 用于将截图二进制数据转换为 Base64 字符串
+ */
 static std::string b64encode(const std::vector<uint8_t>& in) {
     static const char* tbl = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string out;
@@ -63,10 +51,101 @@ static std::string b64encode(const std::vector<uint8_t>& in) {
     }
     return out;
 }
+
+void EdgeManager::handleCloudCommand(const json& msg, std::function<void(const json&)> send) {
+    bool is_snapshot = (msg.contains("type") && msg["type"] == "snapshot_request") ||
+        (msg.contains("type") && msg["type"] == "command" && msg.contains("payload") && msg["payload"] == "SNAPSHOT");
+    bool is_command = (msg.contains("type") && msg["type"] == "command") && !is_snapshot;
+    
+    if (is_snapshot) {
+        std::string req_id = msg.value("cmd_id", "");
+        if (req_id.empty()) req_id = msg.value("req_id", "");
+        
+        printInfo(LogLevel::INFO, "[云端指令] 收到截图指令，请求ID: " + req_id);
+        
+        std::string path = config_.resources_dir + "snapshot.bmp";
+        bool ok = false;
+        if (player_) {
+            ok = player_->CaptureSnapshotBMP(path);
+        }
+        
+        if (ok) {
+            printInfo(LogLevel::INFO, "[云端指令] 截图成功，已保存至: " + path);
+        } else {
+            printInfo(LogLevel::ERROR, "[云端指令] 截图失败");
+        }
+        
+        std::vector<uint8_t> bytes;
+        if (ok) {
+            std::ifstream f(path, std::ios::binary);
+            bytes = std::vector<uint8_t>(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+        }
+        std::string b64 = bytes.empty() ? "" : b64encode(bytes);
+        json snapshot_msg;
+        snapshot_msg["type"] = "snapshot_response";
+        snapshot_msg["device_id"] = config_.device_id;
+        snapshot_msg["req_id"] = req_id;
+        snapshot_msg["ts"] = static_cast<long long>(std::time(nullptr));
+        snapshot_msg["payload"] = { {"format","bmp"},{"data", b64} };
+        send(snapshot_msg);
+    } else if (is_command) {
+        std::string cmd = msg.value("payload", "");
+        std::string cmd_id = msg.value("cmd_id", "");
+        json data = msg.value("data", json::object());
+        
+        printInfo(LogLevel::INFO, "[云端指令] 收到通用指令: " + cmd + ", 参数: " + data.dump());
+        
+        std::string result = "ok";
+        if (cmd == "SET_VOLUME") {
+            int old_vol = current_volume_;
+            bool old_mute = current_mute_;
+            int vol = data.value("volume", current_volume_);
+            bool mute = data.value("mute", current_mute_);
+            current_volume_ = vol;
+            current_mute_ = mute;
+            result = std::string("set_volume:") + std::to_string(vol) + "|mute:" + (mute ? "1" : "0");
+            
+            printInfo(LogLevel::INFO, "[云端指令] 执行完成 SET_VOLUME - 执行前: (音量=" + std::to_string(old_vol) + ", 静音=" + (old_mute ? "是" : "否") + 
+                      ") -> 执行后: (音量=" + std::to_string(vol) + ", 静音=" + (mute ? "是" : "否") + ")");
+        } else if (cmd == "REBOOT") {
+            result = "reboot_ok";
+            should_soft_reboot_ = true;
+            printInfo(LogLevel::INFO, "[云端指令] 执行 REBOOT，设备即将软重启");
+        } else {
+            result = cmd + "_ok";
+            printInfo(LogLevel::INFO, "[云端指令] 未知指令或无需处理的指令: " + cmd);
+        }
+        json resp;
+        resp["type"] = "command_response";
+        resp["device_id"] = config_.device_id;
+        resp["req_id"] = msg.value("req_id", "");
+        resp["ts"] = static_cast<long long>(std::time(nullptr));
+        resp["payload"] = { {"cmd_id", cmd_id}, {"status","success"}, {"result", result} };
+        send(resp);
+        printInfo(LogLevel::INFO, "[云端指令] 回执已发送，指令ID: " + cmd_id);
+    }
+}
+
 EdgeManager::EdgeManager() : is_initialized_(false) {
 }
 
 EdgeManager::~EdgeManager() {
+    // 停止同步线程
+    syncRunning_ = false;
+    if (syncThread_.joinable()) {
+        syncThread_.join();
+    }
+
+    // 停止心跳线程
+    if (watchdogHeartbeatThread_.joinable()) {
+        watchdogHeartbeatThread_.join();
+    }
+
+    // 停止命令线程
+    if (watchdogCommandThread_.joinable()) {
+        watchdogCommandThread_.join();
+    }
+
     // 停止网络客户端
     if (network_) {
         network_->stopGatewayConnection();
@@ -78,13 +157,14 @@ EdgeManager::~EdgeManager() {
     SDL_Quit();
 }
 
-bool EdgeManager::init(const std::string& configPath) {
+bool EdgeManager::init(const std::string& configPath, bool isPlayerMode) {
     if (is_initialized_) {
         printInfo(LogLevel::WARNING, "EdgeManager 已经初始化过了");
         return true;
     }
 
-    printInfo(LogLevel::INFO, "正在初始化 EdgeManager...");
+    is_player_mode_ = isPlayerMode;
+    printInfo(LogLevel::INFO, "正在初始化 EdgeManager (模式: " + std::string(is_player_mode_ ? "播放器" : "单机") + ")...");
 
     // 1. 加载配置文件
     if (!loadConfig(configPath)) {
@@ -98,37 +178,37 @@ bool EdgeManager::init(const std::string& configPath) {
         return false;
     }
 
+    // 3. 初始化网络客户端 (必须在同步数据之前，因为同步现在依赖网络)
+    if (!config_.gateway_ws_url.empty()) {
+        network_ = std::make_unique<NetworkClient>(config_.gateway_ws_url, config_.device_id, config_.token);
+    }
+
     // 4. 加载广告素材数据
     if (!syncAds()) {
-        printInfo(LogLevel::ERROR, "同步广告数据失败");
-        return false;
+        printInfo(LogLevel::WARNING, "初始同步广告数据失败，将依赖本地缓存或后续定时更新");
+    } else {
+        printInfo(LogLevel::INFO, "广告数据已入库");
     }
-    printInfo(LogLevel::INFO, "广告数据已入库");
 
     // 5. 加载排期策略数据
     if (!syncSchedule()) {
-        printInfo(LogLevel::ERROR, "同步排期数据失败");
-        return false;
+        printInfo(LogLevel::WARNING, "初始同步排期数据失败，将依赖本地缓存或后续定时更新");
+    } else {
+        printInfo(LogLevel::INFO, "排期数据已入库");
     }
-    printInfo(LogLevel::INFO, "排期数据已入库");
 
     // 6. 初始化播放器
-    // 创建 VideoPlayer 实例，后续将用于加载和播放媒体文件
     player_ = std::make_unique<VideoPlayer>();
 
     is_initialized_ = true;
     
     // 7. 初始化播放列表 (检查素材完整性)
-    // 预先检查排期中引用的所有素材文件是否存在，避免播放时出错
     if (!initPlaylist()) {
         printInfo(LogLevel::WARNING, "播放列表初始化存在问题");
     }
 
-    // 8. 启动网络客户端 
-    // 如果配置了云端 API 地址，则初始化 NetworkClient 并启动后台上报线程
-    if (!config_.gateway_ws_url.empty()) {
-        network_ = std::make_unique<NetworkClient>(config_.gateway_ws_url);
-        
+    // 8. 启动网络连接 (WebSocket 长连接) - 仅在非播放器模式下启动（播放器模式由守护进程负责心跳）
+    if (!is_player_mode_ && network_ && !config_.gateway_ws_url.empty() && !config_.device_id.empty()) {
         // 读取上报间隔
         int interval = 10;
         try {
@@ -139,72 +219,32 @@ bool EdgeManager::init(const std::string& configPath) {
             }
         } catch (...) {}
 
-        // 启动网关连接
-        // 建立 WebSocket 长连接，用于接收服务端的实时指令
-        if (!config_.gateway_ws_url.empty() && !config_.device_id.empty()) {
-            network_->startGatewayConnection(
-                config_.gateway_ws_url,
-                config_.device_id,
-                config_.token,
-                [this](int limit) { return this->getLogs(limit); },
-                [this](const std::vector<std::string>& logIds) { this->updateLogStatus(logIds, 1); },
-                [this](const json& msg, std::function<void(const json&)> send) {
-                    bool is_snapshot = (msg.contains("type") && msg["type"] == "snapshot_request") ||
-                        (msg.contains("type") && msg["type"] == "command" && msg.contains("payload") && msg["payload"] == "SNAPSHOT");
-                    bool is_command = (msg.contains("type") && msg["type"] == "command") && !is_snapshot;
-                    if (is_snapshot) {
-                        std::string req_id = msg.value("cmd_id", "");
-                        if (req_id.empty()) req_id = msg.value("req_id", "");
-                        std::string path = config_.resources_dir + "snapshot.bmp";
-                        bool ok = false;
-                        if (player_) {
-                            ok = player_->CaptureSnapshotBMP(path);
-                        }
-                        std::vector<uint8_t> bytes;
-                        if (ok) {
-                            std::ifstream f(path, std::ios::binary);
-                            bytes = std::vector<uint8_t>(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
-                        }
-                        std::string b64 = bytes.empty() ? "" : b64encode(bytes);
-                        json snapshot_msg;
-                        snapshot_msg["type"] = "snapshot_response";
-                        snapshot_msg["device_id"] = config_.device_id;
-                        snapshot_msg["req_id"] = req_id;
-                        snapshot_msg["ts"] = static_cast<long long>(std::time(nullptr));
-                        snapshot_msg["payload"] = { {"format","bmp"},{"data", b64} };
-                        send(snapshot_msg);
-                    } else if (is_command) {
-                        std::string cmd = msg.value("payload", "");
-                        std::string cmd_id = msg.value("cmd_id", "");
-                        json data = msg.value("data", json::object());
-                        std::string result = "ok";
-                        if (cmd == "SET_VOLUME") {
-                            int vol = data.value("volume", current_volume_);
-                            bool mute = data.value("mute", current_mute_);
-                            current_volume_ = vol;
-                            current_mute_ = mute;
-                            result = std::string("set_volume:") + std::to_string(vol) + "|mute:" + (mute ? "1" : "0");
-                        } else if (cmd == "REBOOT") {
-                            result = "reboot_ok";
-                            should_soft_reboot_ = true;
-                        } else {
-                            result = cmd + "_ok";
-                        }
-                        json resp;
-                        resp["type"] = "command_response";
-                        resp["device_id"] = config_.device_id;
-                        resp["req_id"] = msg.value("req_id", "");
-                        resp["ts"] = static_cast<long long>(std::time(nullptr));
-                        resp["payload"] = { {"cmd_id", cmd_id}, {"status","success"}, {"result", result} };
-                        send(resp);
-                    }
-                }
-            );
-        }
+        network_->startGatewayConnection(
+            config_.gateway_ws_url,
+            config_.device_id,
+            config_.token,
+            [this](int limit) { return this->getLogs(limit); },
+            [this](const std::vector<std::string>& logIds) { this->updateLogStatus(logIds, 1); },
+            [this](const json& msg, std::function<void(const json&)> send) {
+                this->handleCloudCommand(msg, send);
+            }
+        );
     }
 
-    // 9. 检查并清理存储空间
+    // 9. 启动本地心跳发送 (播放器模式下)
+    if (is_player_mode_) {
+        printInfo(LogLevel::INFO, "启动本地心跳发送线程 (UDP: 9999)");
+        watchdogHeartbeatThread_ = std::thread(&EdgeManager::watchdogHeartbeatLoop, this);
+        printInfo(LogLevel::INFO, "启动本地命令接收线程 (UDP: 9998)");
+        watchdogCommandThread_ = std::thread(&EdgeManager::watchdogCommandLoop, this);
+    }
+
+    // 10. 检查并清理存储空间
     cleanupStorage();
+
+    // 11. 启动定时同步线程
+    syncRunning_ = true;
+    syncThread_ = std::thread(&EdgeManager::syncLoop, this);
 
     printInfo(LogLevel::INFO, "EdgeManager 初始化完成");
 
@@ -269,55 +309,7 @@ void EdgeManager::run() {
                         [this](int limit) { return this->getLogs(limit); },
                         [this](const std::vector<std::string>& logIds) { this->updateLogStatus(logIds, 1); },
                         [this](const json& msg, std::function<void(const json&)> send) {
-                            bool is_snapshot = (msg.contains("type") && msg["type"] == "snapshot_request") ||
-                                (msg.contains("type") && msg["type"] == "command" && msg.contains("payload") && msg["payload"] == "SNAPSHOT");
-                            bool is_command = (msg.contains("type") && msg["type"] == "command") && !is_snapshot;
-                            if (is_snapshot) {
-                                std::string req_id = msg.value("cmd_id", "");
-                                if (req_id.empty()) req_id = msg.value("req_id", "");
-                                std::string path = config_.resources_dir + "snapshot.bmp";
-                                bool ok = false;
-                                if (player_) {
-                                    ok = player_->CaptureSnapshotBMP(path);
-                                }
-                                std::vector<uint8_t> bytes;
-                                if (ok) {
-                                    std::ifstream f(path, std::ios::binary);
-                                    bytes = std::vector<uint8_t>(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
-                                }
-                                std::string b64 = bytes.empty() ? "" : b64encode(bytes);
-                                json snapshot_msg;
-                                snapshot_msg["type"] = "snapshot_response";
-                                snapshot_msg["device_id"] = config_.device_id;
-                                snapshot_msg["req_id"] = req_id;
-                                snapshot_msg["ts"] = static_cast<long long>(std::time(nullptr));
-                                snapshot_msg["payload"] = { {"format","bmp"},{"data", b64} };
-                                send(snapshot_msg);
-                            } else if (is_command) {
-                                std::string cmd = msg.value("payload", "");
-                                std::string cmd_id = msg.value("cmd_id", "");
-                                json data = msg.value("data", json::object());
-                                std::string result = "ok";
-                                if (cmd == "SET_VOLUME") {
-                                    int vol = data.value("volume", current_volume_);
-                                    bool mute = data.value("mute", current_mute_);
-                                    current_volume_ = vol;
-                                    current_mute_ = mute;
-                                    result = std::string("set_volume:") + std::to_string(vol) + "|mute:" + (mute ? "1" : "0");
-                                } else if (cmd == "REBOOT") {
-                                    result = "reboot_ok";
-                                    should_soft_reboot_ = true;
-                                } else {
-                                    result = cmd + "_ok";
-                                }
-                                json resp;
-                                resp["type"] = "command_response";
-                                resp["device_id"] = config_.device_id;
-                                resp["req_id"] = msg.value("req_id", "");
-                                resp["ts"] = static_cast<long long>(std::time(nullptr));
-                                resp["payload"] = { {"cmd_id", cmd_id}, {"status","success"}, {"result", result} };
-                                send(resp);
-                            }
+                            this->handleCloudCommand(msg, send);
                         }
                     );
                 }
@@ -362,15 +354,21 @@ void EdgeManager::run() {
                         // 稍微休眠，释放 CPU，具体休眠时间由 VideoPlayer 内部帧率控制决定，这里只是为了防止空转过快
                         std::this_thread::sleep_for(std::chrono::milliseconds(1));
                         
+                        // 实时检查指令与退出状态
+                        if (should_soft_reboot_) {
+                             player_->Stop();
+                             printInfo(LogLevel::INFO, "检测到重启指令 (播放中)，停止播放并执行重启");
+                             break; 
+                        }
+                        if (should_exit_) {
+                             player_->Stop();
+                             goto end_loop;
+                        }
                         // 实时检查窗口状态
                         // 如果用户手动关闭了窗口，这里需要感知并退出
                         if (!player_->IsWindowOpen()) {
                              player_->Stop();
                              printInfo(LogLevel::INFO, "检测到窗口关闭 (播放中)，准备退出");
-                             goto end_loop;
-                        }
-                        if (should_exit_) {
-                             player_->Stop();
                              goto end_loop;
                         }
                     }
@@ -536,10 +534,14 @@ void EdgeManager::recordPlayEnd(const PlayItem& item, long long startTime, int d
 bool EdgeManager::waitForPlaybackOrStop() {
     // 分段休眠并处理事件，确保能响应退出
     for (int i = 0; i < 50; ++i) {
+        if (should_exit_ || should_soft_reboot_) {
+            return false;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
+                should_exit_ = true;
                 return false; // 收到退出信号
             }
         }
@@ -968,15 +970,6 @@ bool EdgeManager::initDatabase() {
         std::cout << "正在连接数据库: " << config_.db_path << std::endl;
         db_ = std::make_unique<Database>(config_.db_path);
 
-        // 0. 清空现有表结构 (根据需求，每次启动重置)
-        db_->execute("DROP TABLE IF EXISTS log;");
-        db_->execute("DROP TABLE IF EXISTS playlist;");
-        db_->execute("DROP TABLE IF EXISTS timeslot_playlist;"); // 旧表，以防万一
-        db_->execute("DROP TABLE IF EXISTS schedule_timeslot;");
-        db_->execute("DROP TABLE IF EXISTS schedule_interrupt;");
-        db_->execute("DROP TABLE IF EXISTS schedule;");
-        db_->execute("DROP TABLE IF EXISTS advertisement;");
-
         // 1. 日志表 (log)
         // 存储系统运行日志
         std::string createLogTableSQL = 
@@ -1077,25 +1070,22 @@ bool EdgeManager::initDatabase() {
 }
 
 bool EdgeManager::syncAds() {
-    try {
-        std::ifstream f(config_.ads_config_path);
-        if (!f.is_open()) {
-            std::cerr << "无法打开广告配置文件: " << config_.ads_config_path << std::endl;
-            return false;
-        }
-
-        json j;
-        f >> j;
-
-        return syncAds(j);
-
-    } catch (const std::exception& e) {
-        std::cerr << "加载广告数据失败: " << e.what() << std::endl;
+    if (!network_) {
+        printInfo(LogLevel::WARNING, "NetworkClient 未初始化，无法同步广告");
         return false;
     }
+    printInfo(LogLevel::INFO, "正在从网关拉取最新广告...");
+    json ads = network_->fetchAds();
+    if (!ads.is_null() && !ads.empty()) {
+        bool ok = loadAds(ads);
+        network_->reportSyncResult("ads", ok ? "success" : "failed", ok ? "广告同步成功" : "广告解析入库失败");
+        return ok;
+    }
+    network_->reportSyncResult("ads", "failed", "拉取广告数据为空或网络错误");
+    return false;
 }
 
-bool EdgeManager::syncAds(const json& j) {
+bool EdgeManager::loadAds(const json& j) {
     try {
         if (!j.contains("ads")) {
             std::cerr << "Ads.json 格式错误: 缺少 'ads' 字段" << std::endl;
@@ -1103,14 +1093,13 @@ bool EdgeManager::syncAds(const json& j) {
         }
 
         auto ads = j["ads"].get<std::vector<Advertisement>>();
-        std::cout << "读取到 " << ads.size() << " 条广告数据" << std::endl;
+        std::cout << "同步 " << ads.size() << " 条广告数据到数据库" << std::endl;
 
         // 开启事务
-        db_->execute("BEGIN TRANSACTION;");
+        db_->beginTransaction();
 
         for (const auto& ad : ads) {
             // 使用 REPLACE INTO 避免重复插入报错，且能更新数据
-            // 注意：这里不再从 JSON 读取 last_played_time，而是保留数据库中原有的值（如果存在）或者设为 0
             std::string sql = "REPLACE INTO advertisement (ad_id, type, filename, md5, duration, bytes, last_played_time) VALUES ('"
                 + ad.getAdId() + "', '"
                 + ad.getType() + "', '"
@@ -1120,46 +1109,49 @@ bool EdgeManager::syncAds(const json& j) {
                 + std::to_string(ad.getBytes()) + ", "
                 + "0);"; // last_played_time 默认为 0
             db_->execute(sql);
+
+            // 同步后确保素材文件落地到 resources/ads，供播放和完整性校验使用。
+            std::string filePath = config_.resources_dir + "ads/" + ad.getFilename();
+            if (!std::filesystem::exists(filePath)) {
+                if (!network_ || !network_->downloadAdFile(ad.getAdId(), ad.getFilename(), filePath)) {
+                    printInfo(LogLevel::WARNING, "素材下载失败: ad_id=" + ad.getAdId() + ", file=" + filePath);
+                }
+            }
         }
 
-        db_->execute("COMMIT;");
-        std::cout << "广告数据已入库" << std::endl;
+        db_->commit();
         return true;
 
     } catch (const std::exception& e) {
-        std::cerr << "解析广告数据异常: " << e.what() << std::endl;
-        // 尝试回滚
-        try { db_->execute("ROLLBACK;"); } catch (...) {}
+        std::cerr << "同步广告数据异常: " << e.what() << std::endl;
+        try { db_->rollback(); } catch (...) {}
         return false;
     }
 }
 
 bool EdgeManager::syncSchedule() {
-    try {
-        std::ifstream f(config_.schedule_config_path);
-        if (!f.is_open()) {
-            std::cerr << "无法打开排期配置文件: " << config_.schedule_config_path << std::endl;
-            return false;
-        }
-
-        json j;
-        f >> j;
-        
-        return syncSchedule(j);
-
-    } catch (const std::exception& e) {
-        std::cerr << "加载排期数据失败: " << e.what() << std::endl;
+    if (!network_) {
+        printInfo(LogLevel::WARNING, "NetworkClient 未初始化，无法同步排期");
         return false;
     }
+    printInfo(LogLevel::INFO, "正在从网关拉取最新排期...");
+    json schedule = network_->fetchSchedule();
+    if (!schedule.is_null() && !schedule.empty()) {
+        bool ok = loadSchedule(schedule);
+        network_->reportSyncResult("schedule", ok ? "success" : "failed", ok ? "排期同步成功" : "排期解析入库失败");
+        return ok;
+    }
+    network_->reportSyncResult("schedule", "failed", "拉取排期数据为空或网络错误");
+    return false;
 }
 
-bool EdgeManager::syncSchedule(const json& j) {
+bool EdgeManager::loadSchedule(const json& j) {
     try {
         Schedule schedule = Schedule::fromJson(j);
         
-        std::cout << "读取到排期策略: " << schedule.getPolicyId() << std::endl;
+        std::cout << "同步排期策略: " << schedule.getPolicyId() << " 到数据库" << std::endl;
 
-        db_->execute("BEGIN TRANSACTION;");
+        db_->beginTransaction();
 
         // 1. 插入 schedule 表
         std::string scheduleSQL = "REPLACE INTO schedule (policy_id, effective_date, download_base_url, default_volume, download_retry_count, report_interval_sec) VALUES ('"
@@ -1172,7 +1164,6 @@ bool EdgeManager::syncSchedule(const json& j) {
         db_->execute(scheduleSQL);
 
         // 2. 插入 schedule_interrupt 表
-        // 先删除旧的关联数据（简单起见，先删后插）
         db_->execute("DELETE FROM schedule_interrupt WHERE policy_id = '" + schedule.getPolicyId() + "';");
         for (const auto& interrupt : schedule.getInterrupts()) {
             std::string interruptSQL = "INSERT INTO schedule_interrupt (policy_id, trigger_type, ad_id, priority, play_mode, status) VALUES ('"
@@ -1180,14 +1171,13 @@ bool EdgeManager::syncSchedule(const json& j) {
                 + interrupt.getTriggerType() + "', '"
                 + interrupt.getAdId() + "', "
                 + std::to_string(interrupt.getPriority()) + ", '"
-                + interrupt.getPlayMode() + "', 0);"; // 默认 status = 0
+                + interrupt.getPlayMode() + "', 0);";
             db_->execute(interruptSQL);
         }
 
         // 3. 插入 schedule_timeslot 表
         db_->execute("DELETE FROM schedule_timeslot WHERE policy_id = '" + schedule.getPolicyId() + "';");
         for (const auto& slot : schedule.getTimeSlots()) {
-            // 将 playlist 数组转换为 JSON 字符串
             json playlistJson = slot.getPlaylist();
             std::string playlistStr = playlistJson.dump();
 
@@ -1202,13 +1192,77 @@ bool EdgeManager::syncSchedule(const json& j) {
             db_->execute(slotSQL);
         }
 
-        db_->execute("COMMIT;");
-        std::cout << "排期数据已入库" << std::endl;
-        return true;
+            db_->commit();
+            return true;
 
     } catch (const std::exception& e) {
-        std::cerr << "解析排期数据异常: " << e.what() << std::endl;
-        try { db_->execute("ROLLBACK;"); } catch (...) {}
+        std::cerr << "同步排期数据异常: " << e.what() << std::endl;
+        try { db_->rollback(); } catch (...) {}
         return false;
     }
+}
+
+void EdgeManager::syncLoop() {
+    printInfo(LogLevel::INFO, "定时同步线程已启动 (周期: 1分钟)");
+    while (syncRunning_) {
+        // 1. 同步广告
+        syncAds();
+        // 2. 同步排期
+        syncSchedule();
+
+        // 休眠 60s，分段休眠以响应退出
+        for (int i = 0; i < 600 && syncRunning_; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+}
+
+void EdgeManager::watchdogHeartbeatLoop() {
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) return;
+
+    struct sockaddr_in servaddr;
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_port = htons(WD_HEARTBEAT_PORT);
+    servaddr.sin_addr.s_addr = inet_addr(WD_LOCALHOST.c_str());
+
+    const char* hello = "HEARTBEAT";
+    while (!should_exit_) {
+        sendto(sockfd, hello, strlen(hello), 0, (const struct sockaddr *) &servaddr, sizeof(servaddr));
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+    }
+    close(sockfd);
+}
+
+void EdgeManager::watchdogCommandLoop() {
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) return;
+
+    struct sockaddr_in servaddr;
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_port = htons(WD_COMMAND_PORT);
+    servaddr.sin_addr.s_addr = INADDR_ANY;
+
+    if (bind(sockfd, (const struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
+        close(sockfd);
+        return;
+    }
+
+    char buffer[2048];
+    while (!should_exit_) {
+        struct sockaddr_in cliaddr;
+        socklen_t len = sizeof(cliaddr);
+        int n = recvfrom(sockfd, buffer, 2048, 0, (struct sockaddr *)&cliaddr, &len);
+        if (n > 0) {
+            try {
+                std::string msg(buffer, n);
+                json j = json::parse(msg);
+                handleCloudCommand(j, [sockfd, cliaddr, len](const json& reply) {
+                    std::string s = reply.dump();
+                    sendto(sockfd, s.c_str(), s.length(), 0, (const struct sockaddr *)&cliaddr, len);
+                });
+            } catch (...) {}
+        }
+    }
+    close(sockfd);
 }

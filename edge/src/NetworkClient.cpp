@@ -2,9 +2,42 @@
 #include "httplib.h"
 #include <iostream>
 #include <chrono>
+#include <fstream>
+#include <filesystem>
 
-NetworkClient::NetworkClient(const std::string& apiUrl) 
-    : apiUrl_(apiUrl), wsRunning_(false) {
+namespace {
+
+std::string normalizeHttpBase(const std::string& rawUrl) {
+    if (rawUrl.empty()) {
+        return rawUrl;
+    }
+
+    std::string url = rawUrl;
+    if (url.rfind("ws://", 0) == 0) {
+        url = "http://" + url.substr(5);
+    } else if (url.rfind("wss://", 0) == 0) {
+        url = "https://" + url.substr(6);
+    }
+
+    auto schemePos = url.find("://");
+    if (schemePos == std::string::npos) {
+        return url;
+    }
+
+    auto hostStart = schemePos + 3;
+    auto pathPos = url.find('/', hostStart);
+    if (pathPos == std::string::npos) {
+        return url;
+    }
+
+    return url.substr(0, pathPos);
+}
+
+}
+
+NetworkClient::NetworkClient(const std::string& apiUrl, const std::string& deviceId, const std::string& token) 
+    : apiUrl_(normalizeHttpBase(apiUrl)), deviceId_(deviceId), token_(token), wsRunning_(false) {
+    std::cout << "[NetworkClient] HTTP 基地址: " << apiUrl_ << std::endl;
 }
 
 NetworkClient::~NetworkClient() {
@@ -25,6 +58,16 @@ void NetworkClient::startGatewayConnection(const std::string& wsUrl, const std::
 void NetworkClient::stopGatewayConnection() {
     if (wsRunning_) {
         wsRunning_ = false;
+        
+        // 如果当前有正在连接的 WebSocket，主动关闭它以打断阻塞的 read()
+        void* ptr = currentWs_.load();
+        if (ptr) {
+            auto* ws = static_cast<httplib::ws::WebSocketClient*>(ptr);
+            try {
+                ws->close();
+            } catch (...) {}
+        }
+
         if (wsThread_.joinable()) {
             wsThread_.join();
         }
@@ -51,6 +94,7 @@ void NetworkClient::wsLoop(std::string wsUrl, std::string deviceId, std::string 
         try {
             // 创建 WebSocket 客户端
             httplib::ws::WebSocketClient ws(fullUrl);
+            currentWs_ = &ws; // 记录当前活跃的客户端
             
             if (ws.connect()) {
                 std::cout << "[NetworkClient] 网关 WebSocket 连接成功!" << std::endl;
@@ -125,17 +169,157 @@ void NetworkClient::wsLoop(std::string wsUrl, std::string deviceId, std::string 
             } else {
                 std::cerr << "[NetworkClient] WebSocket 连接失败" << std::endl;
             }
-
+            currentWs_ = nullptr; // 连接关闭后清除记录
         } catch (const std::exception& e) {
+            currentWs_ = nullptr;
             std::cerr << "[NetworkClient] WebSocket 异常: " << e.what() << std::endl;
         }
 
         // 重连等待
         if (wsRunning_) {
             std::cout << "[NetworkClient] 5秒后尝试重连..." << std::endl;
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+            // 分段休眠，以便快速响应停止信号
+            for (int i = 0; i < 50 && wsRunning_; ++i) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
         }
     }
+}
+
+json NetworkClient::fetchAds() {
+    try {
+        httplib::Client cli(apiUrl_);
+        std::string path = "/api/ads";
+        if (!deviceId_.empty()) {
+            path += (path.find('?') == std::string::npos ? "?" : "&");
+            path += "device_id=" + deviceId_ + "&token=" + token_;
+        }
+        
+        auto res = cli.Get(path.c_str()); 
+        if (res && res->status == 200) {
+            std::cout << "[NetworkClient] 获取广告数据成功" << std::endl;
+            return json::parse(res->body);
+        } else {
+            std::cerr << "[NetworkClient] 获取广告数据失败: " << (res ? std::to_string(res->status) : "无法连接") << std::endl;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[NetworkClient] 获取广告数据异常: " << e.what() << std::endl;
+    }
+    return json::object();
+}
+
+json NetworkClient::fetchSchedule() {
+    try {
+        httplib::Client cli(apiUrl_);
+        std::string path = "/api/schedule";
+        if (!deviceId_.empty()) {
+            path += (path.find('?') == std::string::npos ? "?" : "&");
+            path += "device_id=" + deviceId_ + "&token=" + token_;
+        }
+        
+        auto res = cli.Get(path.c_str()); 
+        if (res && res->status == 200) {
+            std::cout << "[NetworkClient] 获取排期数据成功" << std::endl;
+            return json::parse(res->body);
+        } else {
+            std::cerr << "[NetworkClient] 获取排期数据失败: " << (res ? std::to_string(res->status) : "无法连接") << std::endl;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[NetworkClient] 获取排期数据异常: " << e.what() << std::endl;
+    }
+    return json::object();
+}
+
+bool NetworkClient::downloadAdFile(const std::string& adId, const std::string& filename, const std::string& savePath) {
+    if ((adId.empty() && filename.empty()) || savePath.empty()) {
+        return false;
+    }
+
+    try {
+        std::filesystem::path p(savePath);
+        auto parent = p.parent_path();
+        if (!parent.empty()) {
+            std::filesystem::create_directories(parent);
+        }
+
+        httplib::Client cli(apiUrl_);
+
+        auto doDownload = [&](const std::string& path, const std::string& tag) -> bool {
+            auto res = cli.Get(path.c_str());
+            if (!res || res->status != 200) {
+                std::cerr << "[NetworkClient] 下载素材失败(" << tag << ") status="
+                          << (res ? std::to_string(res->status) : "无法连接") << std::endl;
+                return false;
+            }
+
+            std::ofstream ofs(savePath, std::ios::binary);
+            if (!ofs.is_open()) {
+                std::cerr << "[NetworkClient] 无法写入素材文件: " << savePath << std::endl;
+                return false;
+            }
+            ofs.write(res->body.data(), static_cast<std::streamsize>(res->body.size()));
+            ofs.close();
+            return true;
+        };
+
+        bool ok = false;
+
+        if (!adId.empty()) {
+            std::string path = "/api/material/file?device_id=" + deviceId_ + "&ad_id=" + adId;
+            if (!token_.empty()) {
+                path += "&token=" + token_;
+            }
+            ok = doDownload(path, "ad_id=" + adId);
+        }
+
+        if (!ok && !filename.empty()) {
+            std::string path = "/api/material/file?device_id=" + deviceId_ + "&filename=" + filename;
+            if (!token_.empty()) {
+                path += "&token=" + token_;
+            }
+            ok = doDownload(path, "filename=" + filename);
+        }
+
+        if (!ok) {
+            return false;
+        }
+
+        std::cout << "[NetworkClient] 素材下载成功 ad_id=" << adId << " filename=" << filename
+                  << " -> " << savePath << std::endl;
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "[NetworkClient] 下载素材异常 ad_id=" << adId << " filename=" << filename
+                  << " err=" << e.what() << std::endl;
+        return false;
+    }
+}
+
+bool NetworkClient::reportSyncResult(const std::string& type, const std::string& status, const std::string& detail) {
+    try {
+        httplib::Client cli(apiUrl_);
+        json payload;
+        payload["device_id"] = deviceId_;
+        payload["type"] = type;
+        payload["status"] = status;
+        payload["detail"] = detail;
+        payload["timestamp"] = std::time(nullptr);
+
+        std::string path = "/api/sync/report";
+        if (!token_.empty()) {
+            path += "?token=" + token_;
+        }
+
+        auto res = cli.Post(path.c_str(), payload.dump(), "application/json");
+        if (res && res->status == 200) {
+            std::cout << "[NetworkClient] 同步结果汇报成功: " << type << " - " << status << std::endl;
+            return true;
+        } else {
+            std::cerr << "[NetworkClient] 同步结果汇报失败: " << (res ? std::to_string(res->status) : "无法连接") << std::endl;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[NetworkClient] 同步结果汇报异常: " << e.what() << std::endl;
+    }
+    return false;
 }
 
 bool NetworkClient::sendHeartbeat(void* wsClient, const std::string& deviceId, const std::string& token) {

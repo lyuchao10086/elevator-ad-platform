@@ -2,7 +2,9 @@
 #include <string>
 #include <filesystem>
 #include <fstream>
+#include <vector>
 #include "EdgeManager.hpp"
+#include "Watchdog.hpp"
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -15,21 +17,34 @@ int main(int argc, char* argv[]) {
     SetConsoleCP(CP_UTF8);
 #endif
     try {
-        // 1. 确定配置文件路径
         std::string configPath = "config.json";
-        if (argc > 1) {
-            configPath = argv[1];
+        bool isWatchdog = false;
+        bool isPlayer = false;
+
+        std::vector<std::string> args(argv + 1, argv + argc);
+        for (size_t i = 0; i < args.size(); ++i) {
+            if (args[i] == "--watchdog") {
+                isWatchdog = true;
+            } else if (args[i] == "--player") {
+                isPlayer = true;
+            } else if (args[i].find(".json") != std::string::npos) {
+                configPath = args[i];
+            }
         }
 
-        // 2. 初始化 EdgeManager
-        EdgeManager manager;
-        if (!manager.init(configPath)) {
-            std::cerr << "EdgeManager 初始化失败，程序退出。" << std::endl;
-            return 1;
+        if (isWatchdog) {
+            // 守护进程模式
+            Watchdog watchdog(configPath, argv[0]);
+            watchdog.run();
+        } else {
+            // 播放器模式 (如果是由守护进程启动的，带有 --player 标记)
+            EdgeManager manager;
+            if (!manager.init(configPath, isPlayer)) {
+                std::cerr << "EdgeManager 初始化失败，程序退出。" << std::endl;
+                return 1;
+            }
+            manager.run();
         }
-
-        // 3. 运行主循环
-        manager.run();
 
     } catch (const std::exception& e) {
         std::cerr << "发生严重错误: " << e.what() << std::endl;

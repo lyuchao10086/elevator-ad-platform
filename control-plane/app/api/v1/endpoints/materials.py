@@ -25,16 +25,23 @@ MATERIAL_DIR.mkdir(parents=True,exist_ok=True)
 # 2) 更新本地 JSON 索引；
 # 3) 尝试同步到 Postgres，但数据库失败不阻塞上传。
 async def upload_material(
-    file: UploadFile = File(...),
+    file: UploadFile = File(None),
     ad_id: str = Form(None),
     advertiser: str = Form(None),
     uploader_id: str = Form(None),
     tags: str = Form(None),
+    oss_url: str = Form(None),
+    type: str = Form(None),
+    duration_sec: int = Form(None),
+    file_name: str = Form(None),
 ):
     try:
-        content = await file.read()
-        size_bytes = len(content)
-        md5 = hashlib.md5(content).hexdigest()
+        if file is None and not oss_url:
+            raise HTTPException(status_code=400, detail="missing file or oss_url")
+
+        content = b""
+        size_bytes = 0
+        md5 = ""
         # 优先生成可读的顺序 ID，便于 Swagger、文件目录和数据库排查。
         # 如果推断失败，再回退到 UUID。
         try:
@@ -43,10 +50,21 @@ async def upload_material(
         except Exception:
             material_id = f"mat_{uuid.uuid4().hex[:8]}"
 
-        # 去掉用户上传文件名里可能携带的路径信息，只保留文件名本身。
-        safe_name = Path(file.filename).name
-        save_path = MATERIAL_DIR / f"{material_id}_{safe_name}"
-        save_path.write_bytes(content)
+        save_path = None
+        resolved_filename = file_name
+        if file is not None:
+            content = await file.read()
+            size_bytes = len(content)
+            md5 = hashlib.md5(content).hexdigest()
+
+            # 去掉用户上传文件名里可能携带的路径信息，只保留文件名本身。
+            resolved_filename = resolved_filename or file.filename or f"{material_id}.bin"
+            safe_name = Path(resolved_filename).name
+            save_path = MATERIAL_DIR / f"{material_id}_{safe_name}"
+            save_path.write_bytes(content)
+        elif not resolved_filename:
+            # URL-only 模式：尽量从链接推断文件名，保持管理界面可读性。
+            resolved_filename = Path((oss_url or "").split("?", 1)[0]).name or f"{material_id}.bin"
         
         created_at = datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
 
@@ -57,16 +75,22 @@ async def upload_material(
             "material_id": material_id,
             "advertiser": chosen_adv,
             "ad_id": ad_id,
-            "file_name": file.filename,
-            "filename": file.filename,
+            "file_name": resolved_filename,
+            "filename": resolved_filename,
+            "oss_url": oss_url,
             "md5": md5,
+            "type": type,
+            "duration_sec": duration_sec,
             "size_bytes": size_bytes,
             "status": "uploaded",
             "created_at": created_at,
             "updated_at": created_at,
             "uploader_id": uploader_id,
             "tags": tags.split(',') if tags else [],
-            "extra": {"path": str(save_path)}
+            "extra": {
+                "path": str(save_path) if save_path else None,
+                "oss_url": oss_url,
+            }
         }
 
         upsert_material(meta)
@@ -98,10 +122,14 @@ async def upload_material(
 
         return MaterialUploadResponse(
             material_id=material_id,
-            filename=file.filename,
+            filename=resolved_filename,
             md5=md5,
             status="uploaded",
-            extra={"path": str(save_path), "size_bytes": size_bytes},
+            extra={
+                "path": str(save_path) if save_path else None,
+                "size_bytes": size_bytes,
+                "oss_url": oss_url,
+            },
         )
     except Exception as e:
         raise HTTPException(status_code = 500,detail =str(e))

@@ -7,6 +7,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/edge.dir/src/NetworkClient.cpp.o.d"
   "CMakeFiles/edge.dir/src/VideoPlayer.cpp.o"
   "CMakeFiles/edge.dir/src/VideoPlayer.cpp.o.d"
+  "CMakeFiles/edge.dir/src/Watchdog.cpp.o"
+  "CMakeFiles/edge.dir/src/Watchdog.cpp.o.d"
   "CMakeFiles/edge.dir/src/main.cpp.o"
   "CMakeFiles/edge.dir/src/main.cpp.o.d"
   "edge"
