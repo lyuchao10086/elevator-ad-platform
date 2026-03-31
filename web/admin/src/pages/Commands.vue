@@ -512,6 +512,44 @@ export default {
       try{ return JSON.stringify(params,null,2) }catch(e){ return '{}'}
     })
 
+    function normalizeSnapshotUrl(raw){
+      const u = (raw || '').toString().trim()
+      if(!u) return ''
+      if(/^https?:\/\//i.test(u)) return u
+      if(u.startsWith('data:image/')) return u
+      if(u.startsWith('/')) return window.location.origin + u
+      if(u.startsWith('snapshots/')){
+        const staticBase = (import.meta.env.VITE_GATEWAY_STATIC_BASE || 'http://127.0.0.1:8080/static').replace(/\/$/, '')
+        return `${staticBase}/${u}`
+      }
+      return u
+    }
+
+    function tryExtractSnapshotUrl(val){
+      if(!val) return ''
+      if(typeof val === 'string') return normalizeSnapshotUrl(val)
+      if(typeof val === 'object') return normalizeSnapshotUrl(val.snapshot_url || val.url || val.path || '')
+      return ''
+    }
+
+    async function pollSnapshotResultByDevice(deviceId, timeoutSec = 45, intervalMs = 1200){
+      const start = Date.now()
+      while((Date.now() - start) / 1000 < timeoutSec){
+        try{
+          const r = await listCommands({ limit: 100, device_id: deviceId, action: 'capture' })
+          const items = r.data?.items || r.data || []
+          const rec = Array.isArray(items) && items.length ? items[0] : null
+          const url = tryExtractSnapshotUrl(rec?.result)
+          if(url){
+            snapshotUrl.value = url
+            return url
+          }
+        }catch(err){ console.warn('pollSnapshotResultByDevice error', err) }
+        await new Promise(res => setTimeout(res, intervalMs))
+      }
+      return ''
+    }
+
     async function onSend(){
       confirmVisible.value = false
       const devicesArr = (selectedDevices && (selectedDevices.value || selectedDevices)) || []
@@ -533,17 +571,25 @@ export default {
         // 若为截屏动作，直接调用 snapshot 获取 URL（更直接且能即时展示）
         if(selectedAction.value === 'capture' && target_device_id){
           try{
-            const snapRes = await api.get(`/v1/devices/remote/${target_device_id}/snapshot`)
-            const url = snapRes.data?.snapshot_url || snapRes.data?.url || ''
+            const snapRes = await api.get(`/v1/devices/remote/${target_device_id}/snapshot`, { timeout: 35000 })
+            const url = tryExtractSnapshotUrl(snapRes.data?.snapshot_url || snapRes.data?.url || snapRes.data)
             if(url) snapshotUrl.value = url
             // 也记录为已下发
             alert('截屏指令已下发: ' + (snapRes.data?.cmd_id || payload.cmd_id))
           }catch(e){
-            console.error('snapshot API failed, fallback to sendCommand', e)
-            const res = await sendCommand(payload)
-            alert('指令已下发: ' + (res.data?.cmd_id || payload.cmd_id))
-            const url = res.data?.data?.url || res.data?.url || ''
-            if(url) snapshotUrl.value = url
+            if(e?.code === 'ECONNABORTED' || /timeout/i.test(e?.message || '')){
+              alert('截图请求耗时较长，正在后台等待设备回传...')
+              const delayedUrl = await pollSnapshotResultByDevice(target_device_id)
+              if(!delayedUrl){
+                alert('截图回传超时，请检查网关回调地址、设备在线状态与 OSS 上传日志')
+              }
+            }else{
+              console.error('snapshot API failed, fallback to sendCommand', e)
+              const res = await sendCommand(payload)
+              alert('指令已下发: ' + (res.data?.cmd_id || payload.cmd_id))
+              const url = tryExtractSnapshotUrl(res.data?.data?.url || res.data?.url || res.data?.result)
+              if(url) snapshotUrl.value = url
+            }
           }
         }else{
           const res = await sendCommand(payload)

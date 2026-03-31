@@ -1,8 +1,10 @@
 import axios from 'axios'
 
+const timeoutMs = Number(import.meta.env.VITE_API_TIMEOUT_MS || 30000)
+
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
-  timeout: 10000,
+  timeout: Number.isFinite(timeoutMs) ? timeoutMs : 30000,
 })
 
 api.interceptors.request.use(config => {

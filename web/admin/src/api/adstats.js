@@ -13,7 +13,15 @@ export async function adsSummary(){
 }
 
 export async function adDetail(ad_file_name){
-  return api.get(`/v1/ad_stats/ads/${encodeURIComponent(ad_file_name)}`)
+  return api.get('/v1/ad_stats/ads/detail', { params: { ad_file_name } })
 }
 
-export default { devicesSummary, deviceDetail, adsSummary, adDetail }
+export async function advertisersList(){
+  return api.get('/v1/ad_stats/advertisers')
+}
+
+export async function billingReport(client_id, month){
+  return api.get('/v1/ad_stats/billing_report', { params: { client_id, month } })
+}
+
+export default { devicesSummary, deviceDetail, adsSummary, adDetail, advertisersList, billingReport }

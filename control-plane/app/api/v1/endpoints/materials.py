@@ -6,6 +6,8 @@ from fastapi.responses import FileResponse, JSONResponse
 
 import hashlib
 import uuid
+import os
+import mimetypes
 from pathlib import Path
 from datetime import datetime, timezone
 from app.services import db_service
@@ -17,6 +19,92 @@ router = APIRouter()
 # best-effort 持久化，保证开发环境和联调环境都能工作。
 MATERIAL_DIR = Path("data/materials")
 MATERIAL_DIR.mkdir(parents=True,exist_ok=True)
+_ENV_LOADED = False
+_ENV_SOURCE = None
+
+
+def _load_control_plane_env_once():
+    """Best-effort .env loader for this module to avoid startup cwd dependency."""
+    global _ENV_LOADED, _ENV_SOURCE
+    if _ENV_LOADED:
+        return
+    try:
+        base_dir = Path(__file__).resolve().parents[4]  # control-plane/
+        env_candidates = [base_dir / ".env", base_dir / ".env.example"]
+        for env_path in env_candidates:
+            if not env_path.exists():
+                continue
+            _ENV_SOURCE = str(env_path)
+            with env_path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    k = k.strip()
+                    v = v.strip().strip('"').strip("'")
+                    if k and (k not in os.environ):
+                        os.environ[k] = v
+    except Exception:
+        # keep upload path robust; missing env file should be surfaced by credential checks later
+        pass
+    finally:
+        _ENV_LOADED = True
+
+
+def _first_env(*names: str, default: str = "") -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value is not None and str(value).strip() != "":
+            return str(value).strip()
+    return default
+
+
+def _upload_to_aliyun_oss(filename: str, content: bytes, content_type: str = None):
+    """Upload bytes to Aliyun OSS and return (public_url, object_key)."""
+    _load_control_plane_env_once()
+    try:
+        import oss2
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"oss sdk unavailable: {e}")
+
+    access_key_id = _first_env("ALIYUN_OSS_ACCESS_KEY_ID", "OSS_ACCESS_KEY_ID", "OSS_ACCESS_KEY")
+    access_key_secret = _first_env("ALIYUN_OSS_ACCESS_KEY_SECRET", "OSS_SECRET_ACCESS_KEY", "OSS_SECRET_KEY")
+    bucket_name = _first_env("ALIYUN_OSS_BUCKET", "OSS_BUCKET", default="bucket-elevator")
+    endpoint = _first_env("ALIYUN_OSS_ENDPOINT", "OSS_ENDPOINT", default="oss-cn-hangzhou.aliyuncs.com")
+    prefix = _first_env("ALIYUN_OSS_OBJECT_PREFIX", "OSS_OBJECT_PREFIX", default="ads").strip("/")
+
+    if not access_key_id or not access_key_secret:
+        source = _ENV_SOURCE or "process environment"
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "missing OSS credentials: set ALIYUN_OSS_ACCESS_KEY_ID/ALIYUN_OSS_ACCESS_KEY_SECRET "
+                "or OSS_ACCESS_KEY/OSS_SECRET_KEY; "
+                f"loaded_from={source}; "
+                f"ak_present={bool(_first_env('ALIYUN_OSS_ACCESS_KEY_ID', 'OSS_ACCESS_KEY_ID', 'OSS_ACCESS_KEY'))}; "
+                f"sk_present={bool(_first_env('ALIYUN_OSS_ACCESS_KEY_SECRET', 'OSS_SECRET_ACCESS_KEY', 'OSS_SECRET_KEY'))}"
+            ),
+        )
+
+    endpoint_url = endpoint if endpoint.startswith("http://") or endpoint.startswith("https://") else f"https://{endpoint}"
+    public_base = _first_env("ALIYUN_OSS_PUBLIC_BASE_URL", "OSS_PUBLIC_BASE_URL", default=f"https://{bucket_name}.{endpoint}").rstrip("/")
+
+    safe_name = Path(filename or "material.bin").name
+    object_key = f"{prefix}/{safe_name}" if prefix else safe_name
+
+    auth = oss2.Auth(access_key_id, access_key_secret)
+    bucket = oss2.Bucket(auth, endpoint_url, bucket_name)
+
+    headers = {}
+    if content_type:
+        headers["Content-Type"] = content_type
+    result = bucket.put_object(object_key, content, headers=headers or None)
+    status = getattr(result, "status", None)
+    if status is None or status < 200 or status >= 300:
+        raise HTTPException(status_code=500, detail=f"upload to OSS failed, status={status}")
+
+    return f"{public_base}/{object_key}", object_key
 
 
 @router.post("/upload", response_model=MaterialUploadResponse)
@@ -30,14 +118,13 @@ async def upload_material(
     advertiser: str = Form(None),
     uploader_id: str = Form(None),
     tags: str = Form(None),
-    oss_url: str = Form(None),
     type: str = Form(None),
     duration_sec: int = Form(None),
     file_name: str = Form(None),
 ):
     try:
-        if file is None and not oss_url:
-            raise HTTPException(status_code=400, detail="missing file or oss_url")
+        if file is None:
+            raise HTTPException(status_code=400, detail="missing file")
 
         content = b""
         size_bytes = 0
@@ -52,6 +139,8 @@ async def upload_material(
 
         save_path = None
         resolved_filename = file_name
+        oss_url = None
+        oss_object_key = None
         if file is not None:
             content = await file.read()
             size_bytes = len(content)
@@ -62,9 +151,10 @@ async def upload_material(
             safe_name = Path(resolved_filename).name
             save_path = MATERIAL_DIR / f"{material_id}_{safe_name}"
             save_path.write_bytes(content)
-        elif not resolved_filename:
-            # URL-only 模式：尽量从链接推断文件名，保持管理界面可读性。
-            resolved_filename = Path((oss_url or "").split("?", 1)[0]).name or f"{material_id}.bin"
+
+            # 自动上传 OSS 并生成可访问的 oss_url。
+            guessed_content_type = file.content_type or mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
+            oss_url, oss_object_key = _upload_to_aliyun_oss(safe_name, content, guessed_content_type)
         
         created_at = datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
 
@@ -90,6 +180,7 @@ async def upload_material(
             "extra": {
                 "path": str(save_path) if save_path else None,
                 "oss_url": oss_url,
+                "oss_object_key": oss_object_key,
             }
         }
 
@@ -129,6 +220,7 @@ async def upload_material(
                 "path": str(save_path) if save_path else None,
                 "size_bytes": size_bytes,
                 "oss_url": oss_url,
+                "oss_object_key": oss_object_key,
             },
         )
     except Exception as e:

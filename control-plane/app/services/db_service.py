@@ -1,8 +1,34 @@
 import os
 import json
 import logging
+from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
+
+
+def _get_table_columns(conn, table_name: str):
+    """Best-effort table column discovery for schema-compatible SQL construction."""
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = %s
+            """,
+            [table_name],
+        )
+        return {r[0] for r in cur.fetchall()}
+    except Exception:
+        logging.exception('failed to inspect columns for table: %s', table_name)
+        return set()
+    finally:
+        cur.close()
 
 
 def get_conn():
@@ -349,8 +375,37 @@ def list_ad_logs(limit=100, offset=0, device_id=None, ad_file_name=None, from_ts
     conn = get_conn()
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        # 左连接 materials 表以获取素材记录中的 duration_sec（单位：秒）
-        sql = "SELECT ad_logs.*, m.duration_sec AS material_duration_sec, m.advertiser AS advertiser FROM ad_logs LEFT JOIN materials m ON m.file_name = ad_logs.ad_file_name"
+        material_cols = _get_table_columns(conn, 'materials')
+
+        join_conditions = []
+        if 'material_id' in material_cols:
+            join_conditions.append("m.material_id = ad_logs.material_id")
+        if 'file_name' in material_cols:
+            # Normalize both sides to basename and separator for robust matching.
+            join_conditions.append(
+                "lower(regexp_replace(replace(coalesce(m.file_name, ''), '\\\\', '/'), '^.*/', '')) = "
+                "lower(regexp_replace(replace(coalesce(ad_logs.ad_file_name, ''), '\\\\', '/'), '^.*/', ''))"
+            )
+        if not join_conditions:
+            join_conditions = ["FALSE"]
+
+        duration_expr = "m.duration_sec" if 'duration_sec' in material_cols else "NULL"
+        advertiser_candidates = []
+        if 'advertiser' in material_cols:
+            advertiser_candidates.append("NULLIF(m.advertiser, '')")
+        if 'extra' in material_cols:
+            advertiser_candidates.append("NULLIF(m.extra->>'advertiser', '')")
+            advertiser_candidates.append("NULLIF(m.extra->>'advertiser_name', '')")
+        if 'ad_id' in material_cols:
+            advertiser_candidates.append("NULLIF(m.ad_id, '')")
+        advertiser_expr = "COALESCE(" + ", ".join(advertiser_candidates) + ")" if advertiser_candidates else "NULL"
+
+        sql = f"""
+            SELECT ad_logs.*, {duration_expr} AS material_duration_sec, {advertiser_expr} AS advertiser
+            FROM ad_logs
+            LEFT JOIN materials m
+                ON ({' OR '.join(join_conditions)})
+        """
         params = []
         where = []
         if device_id:
@@ -398,7 +453,32 @@ def list_ad_logs(limit=100, offset=0, device_id=None, ad_file_name=None, from_ts
             r.setdefault('status_code', r.get('status_code'))
             r.setdefault('expected_md5', r.get('expected_md5'))
             r.setdefault('actual_md5', r.get('actual_md5'))
-            r.setdefault('is_valid', r.get('is_valid'))
+            # 端侧早期日志可能不带 is_valid，做兼容推断：200 且有播放时长 -> True。
+            raw_valid = r.get('is_valid')
+            if raw_valid is None:
+                status_code = r.get('status_code')
+                dur_ms = r.get('duration_ms')
+                status_code_num = None
+                try:
+                    if status_code is not None:
+                        status_code_num = int(status_code)
+                except Exception:
+                    status_code_num = None
+                dur_ms_num = None
+                try:
+                    if dur_ms is not None:
+                        dur_ms_num = float(dur_ms)
+                except Exception:
+                    dur_ms_num = None
+
+                if status_code_num is not None and status_code_num != 200:
+                    r['is_valid'] = False
+                elif dur_ms_num is not None and dur_ms_num > 0:
+                    r['is_valid'] = True
+                else:
+                    r['is_valid'] = None
+            else:
+                r.setdefault('is_valid', raw_valid)
             r.setdefault('advertiser', r.get('advertiser') or '')
             r.setdefault('billing_status', r.get('billing_status'))
             r.setdefault('created_at', r.get('created_at'))
@@ -483,8 +563,37 @@ def get_ad_log(log_id: str):
     conn = get_conn()
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        # 左连接 materials 以获取素材 duration_sec
-        sql = "SELECT ad_logs.*, m.duration_sec AS material_duration_sec FROM ad_logs LEFT JOIN materials m ON m.file_name = ad_logs.ad_file_name WHERE ad_logs.log_id = %s"
+        material_cols = _get_table_columns(conn, 'materials')
+
+        join_conditions = []
+        if 'material_id' in material_cols:
+            join_conditions.append("m.material_id = ad_logs.material_id")
+        if 'file_name' in material_cols:
+            join_conditions.append(
+                "lower(regexp_replace(replace(coalesce(m.file_name, ''), '\\\\', '/'), '^.*/', '')) = "
+                "lower(regexp_replace(replace(coalesce(ad_logs.ad_file_name, ''), '\\\\', '/'), '^.*/', ''))"
+            )
+        if not join_conditions:
+            join_conditions = ["FALSE"]
+
+        duration_expr = "m.duration_sec" if 'duration_sec' in material_cols else "NULL"
+        advertiser_candidates = []
+        if 'advertiser' in material_cols:
+            advertiser_candidates.append("NULLIF(m.advertiser, '')")
+        if 'extra' in material_cols:
+            advertiser_candidates.append("NULLIF(m.extra->>'advertiser', '')")
+            advertiser_candidates.append("NULLIF(m.extra->>'advertiser_name', '')")
+        if 'ad_id' in material_cols:
+            advertiser_candidates.append("NULLIF(m.ad_id, '')")
+        advertiser_expr = "COALESCE(" + ", ".join(advertiser_candidates) + ")" if advertiser_candidates else "NULL"
+
+        sql = f"""
+            SELECT ad_logs.*, {duration_expr} AS material_duration_sec, {advertiser_expr} AS advertiser
+            FROM ad_logs
+            LEFT JOIN materials m
+              ON ({' OR '.join(join_conditions)})
+            WHERE ad_logs.log_id = %s
+        """
         cur.execute(sql, [log_id])
         row = cur.fetchone()
         if not row:
@@ -492,6 +601,29 @@ def get_ad_log(log_id: str):
 
         # compute completion_rate and play_result (reuse logic from list_ad_logs)
         try:
+            if row.get('is_valid') is None:
+                status_code = row.get('status_code')
+                dur_ms = row.get('duration_ms')
+                status_code_num = None
+                try:
+                    if status_code is not None:
+                        status_code_num = int(status_code)
+                except Exception:
+                    status_code_num = None
+                dur_ms_num = None
+                try:
+                    if dur_ms is not None:
+                        dur_ms_num = float(dur_ms)
+                except Exception:
+                    dur_ms_num = None
+
+                if status_code_num is not None and status_code_num != 200:
+                    row['is_valid'] = False
+                elif dur_ms_num is not None and dur_ms_num > 0:
+                    row['is_valid'] = True
+                else:
+                    row['is_valid'] = None
+
             if row.get('is_valid') is False:
                 row['completion_rate'] = 0.0
                 row['play_result'] = '未播放'
@@ -526,6 +658,169 @@ def get_ad_log(log_id: str):
         return row
     finally:
         conn.close()
+
+
+def list_advertisers():
+    """List distinct advertisers from materials table (schema-compatible)."""
+    conn = get_conn()
+    try:
+        cols = _get_table_columns(conn, 'materials')
+        select_parts = []
+        if 'advertiser' in cols:
+            select_parts.append("SELECT NULLIF(TRIM(advertiser), '') AS advertiser FROM materials")
+        if 'extra' in cols:
+            select_parts.append("SELECT NULLIF(TRIM(extra->>'advertiser'), '') AS advertiser FROM materials")
+            select_parts.append("SELECT NULLIF(TRIM(extra->>'advertiser_name'), '') AS advertiser FROM materials")
+        if 'ad_id' in cols:
+            select_parts.append("SELECT NULLIF(TRIM(ad_id), '') AS advertiser FROM materials")
+
+        if not select_parts:
+            return []
+
+        sql = "SELECT DISTINCT advertiser FROM (" + " UNION ALL ".join(select_parts) + ") t WHERE advertiser IS NOT NULL ORDER BY advertiser"
+        cur = conn.cursor()
+        try:
+            cur.execute(sql)
+            rows = cur.fetchall()
+            return [r[0] for r in rows if r and r[0]]
+        finally:
+            cur.close()
+    finally:
+        conn.close()
+
+
+def _month_range_local(month: str, tz_name: str = 'Asia/Shanghai'):
+    """Return (start, end) datetimes for YYYY-MM in local tz."""
+    if not month or len(month) != 7 or month[4] != '-':
+        raise ValueError('month must be in YYYY-MM format')
+    y = int(month[:4])
+    m = int(month[5:7])
+    if m < 1 or m > 12:
+        raise ValueError('month must be in YYYY-MM format')
+
+    tz = ZoneInfo(tz_name) if ZoneInfo is not None else None
+    start = datetime(y, m, 1, 0, 0, 0, tzinfo=tz)
+    if m == 12:
+        end = datetime(y + 1, 1, 1, 0, 0, 0, tzinfo=tz)
+    else:
+        end = datetime(y, m + 1, 1, 0, 0, 0, tzinfo=tz)
+    return start, end
+
+
+def _hour_in_local(dt_val):
+    """Best-effort local hour extraction from datetime-like value."""
+    if dt_val is None:
+        return None
+    if isinstance(dt_val, datetime):
+        if ZoneInfo is not None:
+            try:
+                tz = ZoneInfo('Asia/Shanghai')
+                if dt_val.tzinfo is not None:
+                    return dt_val.astimezone(tz).hour
+            except Exception:
+                pass
+        return dt_val.hour
+    try:
+        v = str(dt_val).strip()
+        if not v:
+            return None
+        # datetime.fromisoformat supports most backend-returned strings.
+        d = datetime.fromisoformat(v.replace('Z', '+00:00'))
+        return _hour_in_local(d)
+    except Exception:
+        return None
+
+
+def generate_billing_report(client_id: str, month: str):
+    """
+    基于完播数据生成广告主结案报告。
+    client_id: 广告商/广告主标识
+    month: YYYY-MM
+    """
+    advertiser = (client_id or '').strip()
+    if not advertiser:
+        raise ValueError('client_id is required')
+
+    start, end = _month_range_local(month)
+    rows = list_ad_logs(limit=500000, offset=0, from_ts=start, to_ts=end)
+
+    groups = {}
+    total_coverage_raw = 0.0
+    for r in rows:
+        adv = (r.get('advertiser') or '').strip()
+        if adv != advertiser:
+            continue
+
+        ad_name = r.get('ad_file_name') or 'unknown'
+        grp = groups.setdefault(ad_name, {
+            'ad_file_name': ad_name,
+            'plays': 0,
+            'sum_rate': 0.0,
+            'count_rate': 0,
+            'coverage_raw': 0.0,
+            'payable_cost': 0.0,
+        })
+
+        dur_ms = r.get('duration_ms')
+        try:
+            dur_ms_num = float(dur_ms) if dur_ms is not None else 0.0
+        except Exception:
+            dur_ms_num = 0.0
+
+        is_valid = r.get('is_valid') is not False
+        if is_valid and dur_ms_num > 0:
+            grp['plays'] += 1
+
+            # 完播率统计：沿用已计算 completion_rate。
+            rate = r.get('completion_rate')
+            if rate is not None:
+                try:
+                    grp['sum_rate'] += float(rate)
+                    grp['count_rate'] += 1
+                except Exception:
+                    pass
+
+            dur_sec = dur_ms_num / 1000.0
+            hour = _hour_in_local(r.get('start_time'))
+            unit = 60.0
+            if hour is not None and hour >= 6 and hour < 20:
+                unit = 15.0
+            coverage_inc = dur_sec / unit
+            grp['coverage_raw'] += coverage_inc
+            total_coverage_raw += coverage_inc
+
+            bs_raw = r.get('billing_status')
+            bs = str(bs_raw).strip().lower() if bs_raw is not None else ''
+            if bs in {'', 'pending', 'unbilled'}:
+                grp['payable_cost'] += dur_sec * 10.0
+
+    items = []
+    total_plays = 0
+    total_payable = 0.0
+    for _, v in groups.items():
+        total_plays += v['plays']
+        total_payable += v['payable_cost']
+        avg = (v['sum_rate'] / v['count_rate']) if v['count_rate'] > 0 else None
+        items.append({
+            'ad_file_name': v['ad_file_name'],
+            'plays': v['plays'],
+            'avg_completion_rate': round(avg, 4) if avg is not None else None,
+            'estimated_coverage': int(v['coverage_raw']),
+            'payable_cost': round(v['payable_cost'], 2),
+        })
+
+    items.sort(key=lambda x: x['plays'], reverse=True)
+    return {
+        'client_id': advertiser,
+        'month': month,
+        'items': items,
+        'summary': {
+            'total_ads': len(items),
+            'total_plays': total_plays,
+            'total_coverage': int(total_coverage_raw),
+            'total_payable_cost': round(total_payable, 2),
+        }
+    }
 
 
 def list_campaigns(limit=100, offset=0):

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from datetime import datetime
 try:
     from zoneinfo import ZoneInfo
@@ -110,7 +110,8 @@ def ads_summary():
                 'sum_rate': 0.0,
                 'count_rate': 0,
                 'items': [],
-                'advertiser': None
+                'advertiser': None,
+                'estimated_cost': 0.0,
             })
             # Count plays excluding logs explicitly marked invalid (is_valid == False)
             if r.get('is_valid') is not False:
@@ -123,6 +124,20 @@ def ads_summary():
             if rate is not None and (r.get('duration_ms') or 0) > 0 and r.get('is_valid') is not False:
                 grp['sum_rate'] += float(rate)
                 grp['count_rate'] += 1
+
+            # Estimated payable amount: valid play duration * 10 yuan/sec
+            # Include statuses that are not billed yet (pending/unbilled/empty).
+            bs_raw = r.get('billing_status')
+            bs = str(bs_raw).strip().lower() if bs_raw is not None else ''
+            if r.get('is_valid') is not False and bs in {'', 'pending', 'unbilled'}:
+                dur_ms = r.get('duration_ms')
+                try:
+                    dur_ms_num = float(dur_ms) if dur_ms is not None else 0.0
+                except Exception:
+                    dur_ms_num = 0.0
+                if dur_ms_num > 0:
+                    grp['estimated_cost'] += (dur_ms_num / 1000.0) * 10.0
+
             grp['items'].append({
                 'advertiser': r.get('advertiser'),
                 'log_id': r.get('log_id'),
@@ -141,7 +156,8 @@ def ads_summary():
                 'ad_file_name': ad,
                 'plays': v['plays'],
                 'avg_completion_rate': round(avg,4) if avg is not None else None,
-                'advertiser': v.get('advertiser')
+                'advertiser': v.get('advertiser'),
+                'estimated_cost': round(v.get('estimated_cost') or 0.0, 2),
             })
         results.sort(key=lambda x: x['plays'], reverse=True)
         return {'total': len(results), 'items': results}
@@ -151,7 +167,7 @@ def ads_summary():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/ads/{ad_file_name}")
+@router.get("/ads/file/{ad_file_name:path}")
 def ad_detail(ad_file_name: str):
     start, now = _today_range_local()
     try:
@@ -162,6 +178,7 @@ def ad_detail(ad_file_name: str):
             {
                 'log_id': r.get('log_id'),
                 'device_id': r.get('device_id'),
+                'advertiser': r.get('advertiser'),
                 'start_time': r.get('start_time'),
                 'end_time': r.get('end_time'),
                 'duration_ms': r.get('duration_ms'),
@@ -173,11 +190,21 @@ def ad_detail(ad_file_name: str):
             }
             for r in rows
         ]
-        return {'ad_file_name': ad_file_name, 'items': items}
+        advertiser = next((it.get('advertiser') for it in items if it.get('advertiser')), None)
+        return {'ad_file_name': ad_file_name, 'advertiser': advertiser, 'items': items}
     except Exception as e:
         import logging
         logging.exception('failed to get ad detail')
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/ads/detail")
+def ad_detail_by_query(ad_file_name: str = Query(..., min_length=1)):
+    """
+    Query-param based ad detail endpoint.
+    Prefer this over path-param when ad_file_name may contain '/'.
+    """
+    return ad_detail(ad_file_name)
 
 
 @router.get('/debug/count')
@@ -189,4 +216,36 @@ def debug_count():
     except Exception as e:
         import logging
         logging.exception('failed to get ad_logs count')
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get('/advertisers')
+def advertisers_list():
+    """Return selectable advertiser list for billing report dialog."""
+    try:
+        items = db_service.list_advertisers()
+        return {'total': len(items), 'items': items}
+    except Exception as e:
+        import logging
+        logging.exception('failed to list advertisers')
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get('/billing_report')
+def billing_report(
+    client_id: str = Query(..., min_length=1),
+    month: str = Query(..., min_length=7, max_length=7),
+):
+    """
+    Generate advertiser closing report by month.
+    month format: YYYY-MM
+    """
+    try:
+        report = db_service.generate_billing_report(client_id=client_id, month=month)
+        return report
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        import logging
+        logging.exception('failed to generate billing report')
         raise HTTPException(status_code=500, detail=str(e))

@@ -15,7 +15,6 @@
 			"set_property",
 			"_pkg_create_imp_target",
 			"_pkg_recalculate",
-			"_pkg_check_modules_internal",
 			"pkg_check_modules",
 			"include_directories",
 			"target_include_directories"
@@ -43,43 +42,37 @@
 				"parent" : 0
 			},
 			{
-				"command" : 6,
+				"command" : 5,
 				"file" : 0,
 				"line" : 22,
 				"parent" : 0
 			},
 			{
-				"command" : 5,
-				"file" : 1,
-				"line" : 841,
-				"parent" : 3
-			},
-			{
 				"command" : 4,
 				"file" : 1,
-				"line" : 669,
-				"parent" : 4
+				"line" : 849,
+				"parent" : 3
 			},
 			{
 				"command" : 3,
 				"file" : 1,
 				"line" : 339,
-				"parent" : 5
+				"parent" : 4
 			},
 			{
 				"command" : 2,
 				"file" : 1,
 				"line" : 320,
-				"parent" : 6
+				"parent" : 5
 			},
 			{
-				"command" : 7,
+				"command" : 6,
 				"file" : 0,
 				"line" : 11,
 				"parent" : 0
 			},
 			{
-				"command" : 8,
+				"command" : 7,
 				"file" : 0,
 				"line" : 38,
 				"parent" : 0
@@ -98,11 +91,11 @@
 			"includes" : 
 			[
 				{
-					"backtrace" : 8,
+					"backtrace" : 7,
 					"path" : "/mnt/d/adver_system/elevator-ad-platform/edge/include"
 				},
 				{
-					"backtrace" : 9,
+					"backtrace" : 8,
 					"isSystem" : true,
 					"path" : "/usr/include/SDL2"
 				}
@@ -152,22 +145,22 @@
 				"role" : "libraries"
 			},
 			{
-				"backtrace" : 7,
+				"backtrace" : 6,
 				"fragment" : "/usr/lib/x86_64-linux-gnu/libavformat.so",
 				"role" : "libraries"
 			},
 			{
-				"backtrace" : 7,
+				"backtrace" : 6,
 				"fragment" : "/usr/lib/x86_64-linux-gnu/libavcodec.so",
 				"role" : "libraries"
 			},
 			{
-				"backtrace" : 7,
+				"backtrace" : 6,
 				"fragment" : "/usr/lib/x86_64-linux-gnu/libavutil.so",
 				"role" : "libraries"
 			},
 			{
-				"backtrace" : 7,
+				"backtrace" : 6,
 				"fragment" : "/usr/lib/x86_64-linux-gnu/libswscale.so",
 				"role" : "libraries"
 			}

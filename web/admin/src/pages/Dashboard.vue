@@ -34,10 +34,15 @@
     <el-card style="margin-top:16px">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <h3 style="margin:0">播放统计 — 广告</h3>
-        <el-input v-model="adFilter" placeholder="筛选素材名" clearable size="small" style="width:220px"/>
+        <div style="display:flex;align-items:center;gap:8px">
+          <el-button size="small" type="primary" @click="openBillingReportDialog">生成报告</el-button>
+          <el-input v-model="adFilter" placeholder="筛选素材名" clearable size="small" style="width:220px"/>
+        </div>
       </div>
       <el-table :data="filteredAds" style="width:100%;margin-top:12px" v-loading="loadingAds" :row-key="row=>row.ad_file_name">
-        <el-table-column prop="ad_file_name" label="素材名"/>
+        <el-table-column label="素材名">
+          <template #default="{ row }">{{ formatMaterialName(row.ad_file_name) }}</template>
+        </el-table-column>
         <el-table-column label="广告商" width="180">
           <template #default="{ row }">{{ row.advertiser || '-' }}</template>
         </el-table-column>
@@ -72,7 +77,9 @@
         <el-table-column label="结束时间" width="180">
           <template #default="{ row }">{{ formatTs(row.end_time) }}</template>
         </el-table-column>
-        <el-table-column prop="ad_file_name" label="素材名"/>
+        <el-table-column label="素材名">
+          <template #default="{ row }">{{ formatMaterialName(row.ad_file_name) }}</template>
+        </el-table-column>
         <el-table-column label="时长(s)" width="120">
           <template #default="{ row }">{{ row.duration_ms!=null ? (Number(row.duration_ms)/1000).toFixed(1) : '-' }}</template>
         </el-table-column>
@@ -119,12 +126,68 @@
         </el-table>
       </div>
     </el-dialog>
+
+    <!-- 广告主结案报告弹窗 -->
+    <el-dialog v-model="billingReportVisible" title="生成结案报告" width="980px">
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        <el-select
+          v-model="billingReportForm.client_id"
+          placeholder="请选择广告商"
+          filterable
+          clearable
+          style="width:260px"
+          :loading="loadingAdvertisers"
+        >
+          <el-option v-for="item in advertisers" :key="item" :label="item" :value="item" />
+        </el-select>
+        <el-date-picker
+          v-model="billingReportForm.month"
+          type="month"
+          format="YYYY-MM"
+          value-format="YYYY-MM"
+          placeholder="请选择月份"
+          style="width:180px"
+        />
+        <el-button type="primary" :loading="loadingBillingReport" @click="generateBillingReport">生成</el-button>
+      </div>
+
+      <div v-if="billingReport" style="margin-bottom:10px;color:#606266">
+        <span><strong>广告商：</strong>{{ billingReport.client_id || '-' }}</span>
+        <span style="margin-left:16px"><strong>月份：</strong>{{ billingReport.month || '-' }}</span>
+        <span style="margin-left:16px"><strong>广告数：</strong>{{ billingReport.summary && billingReport.summary.total_ads != null ? billingReport.summary.total_ads : 0 }}</span>
+        <span style="margin-left:16px"><strong>总播放：</strong>{{ billingReport.summary && billingReport.summary.total_plays != null ? billingReport.summary.total_plays : 0 }}</span>
+        <span style="margin-left:16px"><strong>预计覆盖人次：</strong>{{ billingReport.summary && billingReport.summary.total_coverage != null ? billingReport.summary.total_coverage : 0 }}</span>
+        <span style="margin-left:16px"><strong>应付费用(元)：</strong>{{ billingReport.summary && billingReport.summary.total_payable_cost != null ? formatMoney(billingReport.summary.total_payable_cost) : '0.00' }}</span>
+      </div>
+
+      <el-table
+        :data="(billingReport && billingReport.items) || []"
+        style="width:100%"
+        v-loading="loadingBillingReport"
+        empty-text="请选择广告商并生成报告"
+      >
+        <el-table-column prop="ad_file_name" label="广告名" min-width="280"/>
+        <el-table-column prop="plays" label="播放次数" width="120"/>
+        <el-table-column label="完播率" width="120">
+          <template #default="{ row }">
+            <span v-if="row.avg_completion_rate!=null">{{ (row.avg_completion_rate*100).toFixed(1) }}%</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="estimated_coverage" label="预计覆盖人次" width="140"/>
+        <el-table-column label="需要支付广告费(元)" width="180">
+          <template #default="{ row }">
+            {{ formatMoney(row.payable_cost) }}
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
   </div>
 </template>
 
 <script>
 import api from '../api'
-import { devicesSummary, deviceDetail, adsSummary, adDetail } from '../api/adstats'
+import { devicesSummary, deviceDetail, adsSummary, adDetail, advertisersList, billingReport } from '../api/adstats'
 export default {
   data(){
     return {
@@ -138,7 +201,16 @@ export default {
       deviceDetailVisible: false,
       deviceDetail: null,
       adDetailVisible: false,
-      adDetail: null
+      adDetail: null,
+      billingReportVisible: false,
+      loadingAdvertisers: false,
+      loadingBillingReport: false,
+      advertisers: [],
+      billingReportForm: {
+        client_id: '',
+        month: '',
+      },
+      billingReport: null,
     }
   },
   computed: {
@@ -156,7 +228,7 @@ export default {
       return this.deviceDetail && this.deviceDetail.device_id ? `设备 ${this.deviceDetail.device_id} — 播放详情` : '设备播放详情'
     },
     adDetailTitle(){
-      return this.adDetail && this.adDetail.ad_file_name ? `素材 ${this.adDetail.ad_file_name} — 播放详情` : '素材播放详情'
+      return this.adDetail && this.adDetail.ad_file_name ? `素材 ${this.formatMaterialName(this.adDetail.ad_file_name)} — 播放详情` : '素材播放详情'
     }
   },
   async mounted(){
@@ -169,6 +241,11 @@ export default {
     this.fetchAdsSummary()
   },
   methods: {
+    currentMonth(){
+      const d = new Date()
+      const m = String(d.getMonth() + 1).padStart(2, '0')
+      return `${d.getFullYear()}-${m}`
+    },
     async fetchDevicesSummary(){
       this.loadingDevices = true
       try{
@@ -197,33 +274,10 @@ export default {
       try{
         const r = await adsSummary()
         const data = r.data || { items: [] }
-        this.adsSummary = (data.items || []).map(it => ({ ...it, estimated_cost: null }))
-
-        // for each ad, fetch detail and compute total valid play duration
-        const promises = this.adsSummary.map(async row => {
-          try{
-            const dr = await adDetail(row.ad_file_name)
-            const ddata = (dr && dr.data) ? dr.data : (dr || { items: [] })
-            const items = ddata.items || []
-            const totalMs = items.reduce((s, it) => {
-              if(!it) return s
-              const audit = it.audit_result || {}
-              const isValid = (it.is_valid === true || it.is_valid === 'true') || (audit.is_valid === true || audit.is_valid === 'true')
-              const dur = (it.duration_ms != null) ? Number(it.duration_ms) : (audit.duration_ms != null ? Number(audit.duration_ms) : null)
-              // Only count when is_valid is true AND billing_status is unbilled
-              let bs = (it.billing_status || audit.billing_status || '')
-              bs = (bs == null) ? '' : String(bs).trim().toLowerCase()
-              if(isValid && bs === 'unbilled' && dur != null) return s + dur
-              return s
-            }, 0)
-            // 10 元每秒
-            row.estimated_cost = (Number(totalMs) / 1000) * 10
-          }catch(e){
-            console.warn('compute estimated cost failed for', row.ad_file_name, e)
-            row.estimated_cost = null
-          }
-        })
-        await Promise.all(promises)
+        this.adsSummary = (data.items || []).map(it => ({
+          ...it,
+          estimated_cost: it && it.estimated_cost != null ? Number(it.estimated_cost) : null,
+        }))
       }catch(e){ console.warn('ads summary failed', e); this.adsSummary=[] }
       finally{ this.loadingAds = false }
     },
@@ -236,6 +290,45 @@ export default {
         console.debug('adDetail response', r)
         this.adDetail = (r && r.data) ? r.data : (r || { items: [] })
       }catch(e){ console.warn('ad detail failed', e) }
+    },
+    async openBillingReportDialog(){
+      this.billingReportVisible = true
+      this.billingReport = null
+      if(!this.billingReportForm.month) this.billingReportForm.month = this.currentMonth()
+      if(!this.advertisers || this.advertisers.length === 0){
+        this.loadingAdvertisers = true
+        try{
+          const r = await advertisersList()
+          const data = r.data || { items: [] }
+          this.advertisers = data.items || []
+        }catch(e){
+          console.warn('load advertisers failed', e)
+          this.advertisers = []
+        }
+        finally{ this.loadingAdvertisers = false }
+      }
+    },
+    async generateBillingReport(){
+      const client_id = this.billingReportForm.client_id && String(this.billingReportForm.client_id).trim()
+      const month = this.billingReportForm.month && String(this.billingReportForm.month).trim()
+      if(!client_id){
+        this.$message.warning('请先选择广告商')
+        return
+      }
+      if(!month){
+        this.$message.warning('请先选择月份')
+        return
+      }
+
+      this.loadingBillingReport = true
+      try{
+        const r = await billingReport(client_id, month)
+        this.billingReport = (r && r.data) ? r.data : null
+      }catch(e){
+        console.warn('generate billing report failed', e)
+        this.billingReport = null
+      }
+      finally{ this.loadingBillingReport = false }
     }
     ,
     formatTs(v){
@@ -258,6 +351,13 @@ export default {
     formatMoney(v){
       if(v == null || isNaN(Number(v))) return '-'
       return Number(v).toFixed(2)
+    },
+    formatMaterialName(v){
+      if(v == null) return '-'
+      const s = String(v)
+      const normalized = s.replace(/\\/g, '/')
+      const i = normalized.lastIndexOf('/')
+      return i >= 0 ? normalized.slice(i + 1) : normalized
     },
     formatBilling(row){
       try{

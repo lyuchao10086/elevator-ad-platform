@@ -25,6 +25,8 @@
 #include <vector>
 #include <thread>
 #include <atomic>
+#include <mutex>
+#include <condition_variable>
 
 using json = nlohmann::json;
 
@@ -234,6 +236,16 @@ private:
     // 守护进程命令监听线程
     std::thread watchdogCommandThread_;
     void watchdogCommandLoop();
+
+    // 截图请求在主线程执行，避免跨线程访问 SDL 渲染器导致异常帧。
+    std::mutex snapshot_mutex_;
+    std::condition_variable snapshot_cv_;
+    bool snapshot_request_pending_ = false;
+    bool snapshot_result_ready_ = false;
+    bool snapshot_ok_ = false;
+    std::string snapshot_req_id_;
+    std::string snapshot_b64_;
+    void processPendingSnapshotRequest();
 
     // 轮播索引 (用于 getNextAsset 轮询 timeslot 中的列表)
     size_t current_playlist_index_ = 0;

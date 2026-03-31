@@ -27,9 +27,6 @@
               <el-option label="other" value="其他" />
             </el-select>
           </el-form-item>
-          <el-form-item label="广告链接 (可选)">
-            <el-input v-model="uploadForm.oss_url" placeholder="填写已有外部链接"></el-input>
-          </el-form-item>
           <el-form-item label="上传文件">
             <el-upload
               ref="localUpload"
@@ -94,7 +91,7 @@ export default {
     const uploadProgress = ref(0)
 
     const dialogVisible = ref(false)
-    const uploadForm = ref({ advertiser: '', tags: '', type: 'video', duration_sec: null, oss_url: '', uploader_id: 'web-admin' })
+    const uploadForm = ref({ advertiser: '', tags: '', type: 'video', duration_sec: null, uploader_id: 'web-admin' })
     const fileList = ref([])
     const pickedFile = ref(null)
 
@@ -147,7 +144,7 @@ export default {
 
     function openUploadDialog(){
       console.debug('openUploadDialog called')
-      uploadForm.value = { advertiser: '', tags: '', type: 'video', duration_sec: null, oss_url: '', uploader_id: 'web-admin' }
+      uploadForm.value = { advertiser: '', tags: '', type: 'video', duration_sec: null, uploader_id: 'web-admin' }
       fileList.value = []
       pickedFile.value = null
       dialogVisible.value = true
@@ -165,7 +162,7 @@ export default {
       pickedFile.value = file.raw || null
       fileList.value = fileListArg
       // prefill filename if empty
-      if(pickedFile.value && !uploadForm.value.oss_url){
+      if(pickedFile.value){
         uploadForm.value.file_name = pickedFile.value.name
       }
     }
@@ -180,7 +177,8 @@ export default {
 
     function onUploadError(err, file){
       console.error('upload error', err)
-      ElMessage.error('上传失败')
+      const detail = err?.response?.data?.detail
+      ElMessage.error(detail ? `上传失败: ${detail}` : '上传失败')
       uploadLoading.value = false
       uploadProgress.value = 0
     }
@@ -208,7 +206,6 @@ export default {
         if(uploadForm.value.tags) fd.append('tags', uploadForm.value.tags)
         if(uploadForm.value.type) fd.append('type', uploadForm.value.type)
         if(uploadForm.value.duration_sec != null) fd.append('duration_sec', String(uploadForm.value.duration_sec))
-        if(uploadForm.value.oss_url) fd.append('oss_url', uploadForm.value.oss_url)
         if(uploadForm.value.file_name) fd.append('file_name', uploadForm.value.file_name)
 
         const res = await materialsApi.uploadMaterial(fd, {

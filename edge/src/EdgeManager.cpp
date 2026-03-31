@@ -63,24 +63,33 @@ void EdgeManager::handleCloudCommand(const json& msg, std::function<void(const j
         
         printInfo(LogLevel::INFO, "[云端指令] 收到截图指令，请求ID: " + req_id);
         
-        std::string path = config_.resources_dir + "snapshot.bmp";
+        std::string b64;
         bool ok = false;
-        if (player_) {
-            ok = player_->CaptureSnapshotBMP(path);
+        {
+            std::unique_lock<std::mutex> lock(snapshot_mutex_);
+            snapshot_req_id_ = req_id;
+            snapshot_b64_.clear();
+            snapshot_ok_ = false;
+            snapshot_result_ready_ = false;
+            snapshot_request_pending_ = true;
         }
-        
-        if (ok) {
-            printInfo(LogLevel::INFO, "[云端指令] 截图成功，已保存至: " + path);
-        } else {
-            printInfo(LogLevel::ERROR, "[云端指令] 截图失败");
+        snapshot_cv_.notify_all();
+
+        {
+            std::unique_lock<std::mutex> lock(snapshot_mutex_);
+            bool done = snapshot_cv_.wait_for(lock, std::chrono::seconds(5), [this]() {
+                return snapshot_result_ready_;
+            });
+            if (done) {
+                ok = snapshot_ok_;
+                b64 = snapshot_b64_;
+            }
         }
-        
-        std::vector<uint8_t> bytes;
-        if (ok) {
-            std::ifstream f(path, std::ios::binary);
-            bytes = std::vector<uint8_t>(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+
+        if (!ok) {
+            printInfo(LogLevel::ERROR, "[云端指令] 截图失败或超时");
         }
-        std::string b64 = bytes.empty() ? "" : b64encode(bytes);
+
         json snapshot_msg;
         snapshot_msg["type"] = "snapshot_response";
         snapshot_msg["device_id"] = config_.device_id;
@@ -124,6 +133,54 @@ void EdgeManager::handleCloudCommand(const json& msg, std::function<void(const j
         send(resp);
         printInfo(LogLevel::INFO, "[云端指令] 回执已发送，指令ID: " + cmd_id);
     }
+}
+
+void EdgeManager::processPendingSnapshotRequest() {
+    std::string req_id;
+    {
+        std::unique_lock<std::mutex> lock(snapshot_mutex_);
+        if (!snapshot_request_pending_) {
+            return;
+        }
+        req_id = snapshot_req_id_;
+        snapshot_request_pending_ = false;
+    }
+
+    std::string path = config_.resources_dir + "snapshot.bmp";
+    bool ok = false;
+    std::string b64;
+
+    if (player_) {
+        // 先尝试推进一帧渲染，降低抓到空帧/旧帧的概率。
+        player_->Update();
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        player_->Update();
+        ok = player_->CaptureSnapshotBMP(path);
+    }
+
+    if (ok) {
+        std::ifstream f(path, std::ios::binary);
+        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        if (!bytes.empty()) {
+            b64 = b64encode(bytes);
+        } else {
+            ok = false;
+        }
+    }
+
+    if (ok) {
+        printInfo(LogLevel::INFO, "[云端指令] 主线程截图成功，req_id=" + req_id + ", 文件: " + path);
+    } else {
+        printInfo(LogLevel::ERROR, "[云端指令] 主线程截图失败，req_id=" + req_id);
+    }
+
+    {
+        std::unique_lock<std::mutex> lock(snapshot_mutex_);
+        snapshot_ok_ = ok;
+        snapshot_b64_ = b64;
+        snapshot_result_ready_ = true;
+    }
+    snapshot_cv_.notify_all();
 }
 
 EdgeManager::EdgeManager() : is_initialized_(false) {
@@ -282,6 +339,8 @@ void EdgeManager::run() {
     // 3. 在播放过程中持续调用 player_->Update (渲染画面)
     // 4. 监控窗口状态，处理意外关闭
     while (true) {
+        processPendingSnapshotRequest();
+
         if (should_soft_reboot_) {
             printInfo(LogLevel::INFO, "执行软重启：断开网关连接，关闭播放器，再次上线");
             try {
@@ -348,6 +407,8 @@ void EdgeManager::run() {
                     // 等待播放结束
                     // 这是一个阻塞循环，但必须在其中不断调用 Update 以刷新 UI
                     while (player_->IsPlaying()) {
+                        processPendingSnapshotRequest();
+
                         // 核心渲染调用：处理 SDL 事件并刷新纹理
                         player_->Update();
                         
@@ -534,6 +595,8 @@ void EdgeManager::recordPlayEnd(const PlayItem& item, long long startTime, int d
 bool EdgeManager::waitForPlaybackOrStop() {
     // 分段休眠并处理事件，确保能响应退出
     for (int i = 0; i < 50; ++i) {
+        processPendingSnapshotRequest();
+
         if (should_exit_ || should_soft_reboot_) {
             return false;
         }

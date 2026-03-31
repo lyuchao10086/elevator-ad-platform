@@ -345,12 +345,29 @@ func (h *Handler) handleSnapshot(msg DeviceMessage) {
 		return
 	}
 
-	// 3. 生成 OSS Object Key
+	// 3. 生成 OSS Object Key（按设备上报格式保存，避免 bmp 数据被当作 jpg）
+	format := strings.ToLower(strings.TrimSpace(payload.Format))
+	if format == "" {
+		format = "jpg"
+	}
+	contentType := "image/jpeg"
+	if format == "jpg" {
+		format = "jpeg"
+	}
+	switch format {
+	case "jpeg", "png", "bmp", "gif", "webp":
+		contentType = "image/" + format
+	default:
+		format = "jpeg"
+		contentType = "image/jpeg"
+	}
+
 	objectKey := fmt.Sprintf(
-		"snapshots/%s/%d_%s.jpg",
+		"snapshots/%s/%d_%s.%s",
 		msg.DeviceID,
 		msg.TS,
 		msg.ReqID,
+		format,
 	)
 	var ossURL string
 	// 4. 上传 OSS
@@ -365,7 +382,7 @@ func (h *Handler) handleSnapshot(msg DeviceMessage) {
 		err = h.bucket.PutObject(
 			objectKey,
 			bytes.NewReader(imgBytes),
-			oss.ContentType("image/jpeg"),
+			oss.ContentType(contentType),
 		)
 
 		if err != nil {
