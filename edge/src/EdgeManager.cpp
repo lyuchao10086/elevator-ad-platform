@@ -13,6 +13,18 @@
 #include <filesystem>
 #include <random> // 增加 random 头文件
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#undef ERROR
+#undef INFO
+#undef WARNING
+#undef CreateWindow
+#define close closesocket
+typedef int socklen_t;
 #else
 #include <ifaddrs.h>
 #include <netinet/in.h>
@@ -1284,13 +1296,22 @@ void EdgeManager::syncLoop() {
 }
 
 void EdgeManager::watchdogHeartbeatLoop() {
+#ifdef _WIN32
+    SOCKET sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd == INVALID_SOCKET) return;
+#else
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) return;
+#endif
 
     struct sockaddr_in servaddr;
     servaddr.sin_family = AF_INET;
     servaddr.sin_port = htons(WD_HEARTBEAT_PORT);
+#ifdef _WIN32
+    servaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+#else
     servaddr.sin_addr.s_addr = inet_addr(WD_LOCALHOST.c_str());
+#endif
 
     const char* hello = "HEARTBEAT";
     while (!should_exit_) {
@@ -1301,8 +1322,13 @@ void EdgeManager::watchdogHeartbeatLoop() {
 }
 
 void EdgeManager::watchdogCommandLoop() {
+#ifdef _WIN32
+    SOCKET sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd == INVALID_SOCKET) return;
+#else
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) return;
+#endif
 
     struct sockaddr_in servaddr;
     servaddr.sin_family = AF_INET;

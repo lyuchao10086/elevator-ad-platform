@@ -8,12 +8,12 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/mnt/d/adver_system/elevator-ad-platform/edge/src/Database.cpp" "CMakeFiles/edge.dir/src/Database.cpp.o" "gcc" "CMakeFiles/edge.dir/src/Database.cpp.o.d"
-  "/mnt/d/adver_system/elevator-ad-platform/edge/src/EdgeManager.cpp" "CMakeFiles/edge.dir/src/EdgeManager.cpp.o" "gcc" "CMakeFiles/edge.dir/src/EdgeManager.cpp.o.d"
-  "/mnt/d/adver_system/elevator-ad-platform/edge/src/NetworkClient.cpp" "CMakeFiles/edge.dir/src/NetworkClient.cpp.o" "gcc" "CMakeFiles/edge.dir/src/NetworkClient.cpp.o.d"
-  "/mnt/d/adver_system/elevator-ad-platform/edge/src/VideoPlayer.cpp" "CMakeFiles/edge.dir/src/VideoPlayer.cpp.o" "gcc" "CMakeFiles/edge.dir/src/VideoPlayer.cpp.o.d"
-  "/mnt/d/adver_system/elevator-ad-platform/edge/src/Watchdog.cpp" "CMakeFiles/edge.dir/src/Watchdog.cpp.o" "gcc" "CMakeFiles/edge.dir/src/Watchdog.cpp.o.d"
-  "/mnt/d/adver_system/elevator-ad-platform/edge/src/main.cpp" "CMakeFiles/edge.dir/src/main.cpp.o" "gcc" "CMakeFiles/edge.dir/src/main.cpp.o.d"
+  "/Users/lyuchao/Documents/trae_projects/edge/src/Database.cpp" "CMakeFiles/edge.dir/src/Database.cpp.o" "gcc" "CMakeFiles/edge.dir/src/Database.cpp.o.d"
+  "/Users/lyuchao/Documents/trae_projects/edge/src/EdgeManager.cpp" "CMakeFiles/edge.dir/src/EdgeManager.cpp.o" "gcc" "CMakeFiles/edge.dir/src/EdgeManager.cpp.o.d"
+  "/Users/lyuchao/Documents/trae_projects/edge/src/NetworkClient.cpp" "CMakeFiles/edge.dir/src/NetworkClient.cpp.o" "gcc" "CMakeFiles/edge.dir/src/NetworkClient.cpp.o.d"
+  "/Users/lyuchao/Documents/trae_projects/edge/src/VideoPlayer.cpp" "CMakeFiles/edge.dir/src/VideoPlayer.cpp.o" "gcc" "CMakeFiles/edge.dir/src/VideoPlayer.cpp.o.d"
+  "/Users/lyuchao/Documents/trae_projects/edge/src/Watchdog.cpp" "CMakeFiles/edge.dir/src/Watchdog.cpp.o" "gcc" "CMakeFiles/edge.dir/src/Watchdog.cpp.o.d"
+  "/Users/lyuchao/Documents/trae_projects/edge/src/main.cpp" "CMakeFiles/edge.dir/src/main.cpp.o" "gcc" "CMakeFiles/edge.dir/src/main.cpp.o.d"
   )
 
 # Targets to which this target links which contain Fortran sources.
