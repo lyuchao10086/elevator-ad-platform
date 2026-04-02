@@ -12,6 +12,7 @@
 #include <chrono> // 增加 chrono 头文件
 #include <filesystem>
 #include <random> // 增加 random 头文件
+#include <set>    // 增加 set 头文件
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -128,13 +129,22 @@ void EdgeManager::handleCloudCommand(const json& msg, std::function<void(const j
             
             printInfo(LogLevel::INFO, "[云端指令] 执行完成 SET_VOLUME - 执行前: (音量=" + std::to_string(old_vol) + ", 静音=" + (old_mute ? "是" : "否") + 
                       ") -> 执行后: (音量=" + std::to_string(vol) + ", 静音=" + (mute ? "是" : "否") + ")");
+            
+            // 记录命令执行日志
+            log("SYSTEM", "COMMAND_VOLUME", static_cast<long long>(std::time(nullptr)), static_cast<long long>(std::time(nullptr)), 0, 200, "SET_VOLUME SUCCESS", "COMMAND");
         } else if (cmd == "REBOOT") {
             result = "reboot_ok";
             should_soft_reboot_ = true;
             printInfo(LogLevel::INFO, "[云端指令] 执行 REBOOT，设备即将软重启");
+            
+            // 记录命令执行日志
+            log("SYSTEM", "COMMAND_REBOOT", static_cast<long long>(std::time(nullptr)), static_cast<long long>(std::time(nullptr)), 0, 200, "REBOOT TRIGGERED", "COMMAND");
         } else {
             result = cmd + "_ok";
             printInfo(LogLevel::INFO, "[云端指令] 未知指令或无需处理的指令: " + cmd);
+            
+            // 记录命令执行日志
+            log("SYSTEM", "COMMAND_UNKNOWN", static_cast<long long>(std::time(nullptr)), static_cast<long long>(std::time(nullptr)), 0, 404, "UNKNOWN COMMAND: " + cmd, "COMMAND");
         }
         json resp;
         resp["type"] = "command_response";
@@ -158,7 +168,19 @@ void EdgeManager::processPendingSnapshotRequest() {
         snapshot_request_pending_ = false;
     }
 
-    std::string path = config_.resources_dir + "snapshot.bmp";
+    std::string snapshotDir = config_.resources_dir + "snapshots/";
+    if (!std::filesystem::exists(snapshotDir)) {
+        std::filesystem::create_directories(snapshotDir);
+    }
+
+    auto now = std::chrono::system_clock::now();
+    std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+    std::tm* local_tm = std::localtime(&now_c);
+    std::stringstream ss;
+    ss << std::put_time(local_tm, "%Y%m%d_%H%M%S");
+    std::string timestamp = ss.str();
+
+    std::string path = snapshotDir + "snapshot_" + timestamp + "_" + req_id + ".bmp";
     bool ok = false;
     std::string b64;
 
@@ -182,8 +204,12 @@ void EdgeManager::processPendingSnapshotRequest() {
 
     if (ok) {
         printInfo(LogLevel::INFO, "[云端指令] 主线程截图成功，req_id=" + req_id + ", 文件: " + path);
+        // 记录命令执行日志
+        log("SYSTEM", "COMMAND_SNAPSHOT", static_cast<long long>(std::time(nullptr)), static_cast<long long>(std::time(nullptr)), 0, 200, "SNAPSHOT SUCCESS: " + req_id, "COMMAND");
     } else {
         printInfo(LogLevel::ERROR, "[云端指令] 主线程截图失败，req_id=" + req_id);
+        // 记录命令执行日志
+        log("SYSTEM", "COMMAND_SNAPSHOT", static_cast<long long>(std::time(nullptr)), static_cast<long long>(std::time(nullptr)), 0, 500, "SNAPSHOT FAILED: " + req_id, "COMMAND");
     }
 
     {
@@ -584,8 +610,8 @@ void EdgeManager::recordPlayEnd(const PlayItem& item, long long startTime, int d
     long long endTime = std::time(nullptr);
     std::string statusMsg = (statusCode == 200) ? "Play Success" : "Play Failed";
     
-    // 调用现有的 log 方法写入 log 表
-    log(item.getAdId(), item.getFilePath(), startTime, endTime, durationMs, statusCode, statusMsg);
+    // 调用现有的 log 方法写入 log 表，指定为 PLAYBACK 类型
+    log(item.getAdId(), item.getFilePath(), startTime, endTime, durationMs, statusCode, statusMsg, "PLAYBACK");
     
     // 3. 更新状态 (使用事务)
     try {
@@ -726,7 +752,21 @@ std::unique_ptr<PlayItem> EdgeManager::getNextAsset() {
         printInfo(LogLevel::ERROR, "查询排期失败: " + std::string(e.what()));
     }
     
-    return nullptr; // 没有可播放的内容
+    // 3. 兜底逻辑：播放默认视频 (default.mp4)
+    // 当连接不上网关导致没有有效排期，或排期为空时，播放本地默认视频
+    std::string defaultPath = config_.resources_dir + "ads/default.mp4";
+    if (std::filesystem::exists(defaultPath)) {
+        return std::make_unique<PlayItem>(
+            "DEFAULT", 
+            defaultPath, 
+            "video", 
+            0,  // 0 表示播放完整视频
+            60, 
+            0   // 最低优先级
+        );
+    }
+
+    return nullptr; // 没有可播放的内容，且默认视频也不存在
 }
 
 bool EdgeManager::initPlaylist() {
@@ -738,7 +778,7 @@ bool EdgeManager::initPlaylist() {
         auto slots = db_->query(sql);
         
         if (slots.empty()) {
-            printInfo(LogLevel::WARNING, "排期表为空，请检查 Schedule.json 是否正确加载");
+            printInfo(LogLevel::WARNING, "数据库排期表为空，请确保已从网关同步排期策略");
             return false;
         }
 
@@ -781,6 +821,48 @@ bool EdgeManager::initPlaylist() {
 }
 
 void EdgeManager::cleanupStorage() {
+    // 1. 清理 7 天前的截图
+    try {
+        std::string snapshotDir = config_.resources_dir + "snapshots/";
+        if (std::filesystem::exists(snapshotDir)) {
+            auto now = std::chrono::system_clock::now();
+            int deletedCount = 0;
+            for (const auto& entry : std::filesystem::directory_iterator(snapshotDir)) {
+                if (entry.is_regular_file()) {
+                    auto ftime = std::filesystem::last_write_time(entry);
+                    // 转换文件时间到系统时间 (C++20 std::chrono::file_clock::to_sys)
+                    // 为兼容旧版本，这里使用简化的时间比较
+                    auto sftime = std::chrono::time_point_cast<std::chrono::system_clock::duration>(ftime - std::filesystem::file_time_type::clock::now() + now);
+                    auto age = std::chrono::duration_cast<std::chrono::hours>(now - sftime).count();
+                    
+                    if (age > 24 * 7) { // 7 天
+                        std::filesystem::remove(entry);
+                        deletedCount++;
+                    }
+                }
+            }
+            if (deletedCount > 0) {
+                printInfo(LogLevel::INFO, "已清理 " + std::to_string(deletedCount) + " 个过期截图文件 (7天前)");
+            }
+        }
+    } catch (const std::exception& e) {
+        printInfo(LogLevel::ERROR, "清理过期截图失败: " + std::string(e.what()));
+    }
+
+    // 2. 清理 5 天前已上传的日志 (uploaded = 1)
+    if (db_) {
+        try {
+            long long fiveDaysAgo = std::time(nullptr) - (5LL * 24 * 60 * 60);
+            std::string sql = "DELETE FROM log WHERE uploaded = 1 AND created_at < " + std::to_string(fiveDaysAgo) + ";";
+            db_->execute(sql);
+            // 顺便执行一下 VACUUM，压缩数据库空间 (可选)
+            // db_->execute("VACUUM;");
+        } catch (const std::exception& e) {
+            printInfo(LogLevel::ERROR, "清理过期日志失败: " + std::string(e.what()));
+        }
+    }
+
+    // 3. 原有的 LRU 广告清理逻辑
     long long maxSizeBytes = 5LL * 1024 * 1024 * 1024; // 5GB
     long long currentSize = 0;
     
@@ -913,7 +995,7 @@ std::string getLocalIPAddress() {
 #endif
 }
 
-void EdgeManager::log(const std::string& adId, const std::string& adFileName, long long startTime, long long endTime, int durationMs, int statusCode, const std::string& statusMsg) {
+void EdgeManager::log(const std::string& adId, const std::string& adFileName, long long startTime, long long endTime, int durationMs, int statusCode, const std::string& statusMsg, const std::string& logType) {
     if (!db_) return;
 
     try {
@@ -945,7 +1027,7 @@ void EdgeManager::log(const std::string& adId, const std::string& adFileName, lo
             return ss.str();
         };
 
-        std::string sql = "INSERT INTO log (log_id, device_id, ad_id, ad_file_name, start_time, end_time, duration_ms, status_code, status_msg, created_at, device_ip, firmware_version, uploaded) VALUES ('"
+        std::string sql = "INSERT INTO log (log_id, device_id, ad_id, ad_file_name, start_time, end_time, duration_ms, status_code, status_msg, created_at, device_ip, firmware_version, log_type, uploaded) VALUES ('"
             + logId + "', '"
             + deviceId + "', '"
             + adId + "', '"
@@ -957,12 +1039,13 @@ void EdgeManager::log(const std::string& adId, const std::string& adFileName, lo
             + statusMsg + "', "
             + std::to_string(createdAt) + ", '"
             + deviceIp + "', '"
-            + firmwareVersion + "', 0);"; // 默认未上传
+            + firmwareVersion + "', '"
+            + logType + "', 0);"; // 默认未上传
         
         db_->execute(sql);
         
         // 同时输出到控制台
-        std::cout << "[LOG] " << adFileName << " (" << durationMs << "ms) - " << statusCode << std::endl;
+        std::cout << "[LOG][" << logType << "] " << adFileName << " (" << durationMs << "ms) - " << statusCode << std::endl;
 
     } catch (const std::exception& e) {
         std::cerr << "日志写入数据库失败: " << e.what() << std::endl;
@@ -1028,7 +1111,9 @@ json EdgeManager::getLogs(int limit) {
                 row.at("status_msg"),
                 std::stoll(row.at("created_at")),
                 row.at("device_ip"),
-                row.at("firmware_version")
+                row.at("firmware_version"),
+                row.at("log_type"),
+                std::stoi(row.at("uploaded"))
             );
             logs.push_back(log);
         }
@@ -1061,6 +1146,7 @@ bool EdgeManager::initDatabase() {
             "created_at BIGINT, "
             "device_ip TEXT, " // sqlite 不支持 INET 类型，用 TEXT 代替
             "firmware_version TEXT, "
+            "log_type TEXT DEFAULT 'PLAYBACK', " // PLAYBACK, CRASH, COMMAND, SYSTEM
             "uploaded INTEGER DEFAULT 0"
             ");";
         db_->execute(createLogTableSQL);
@@ -1150,31 +1236,23 @@ bool EdgeManager::syncAds() {
         return false;
     }
     printInfo(LogLevel::INFO, "正在从网关拉取最新广告...");
-    json ads = network_->fetchAds();
-    if (!ads.is_null() && !ads.empty()) {
-        bool ok = loadAds(ads);
-        network_->reportSyncResult("ads", ok ? "success" : "failed", ok ? "广告同步成功" : "广告解析入库失败");
-        return ok;
+    json j = network_->fetchAds();
+    if (j.is_null() || j.empty()) {
+        network_->reportSyncResult("ads", "failed", "拉取广告数据为空或网络错误");
+        return false;
     }
-    network_->reportSyncResult("ads", "failed", "拉取广告数据为空或网络错误");
-    return false;
-}
 
-bool EdgeManager::loadAds(const json& j) {
     try {
         if (!j.contains("ads")) {
-            std::cerr << "Ads.json 格式错误: 缺少 'ads' 字段" << std::endl;
+            printInfo(LogLevel::ERROR, "云端返回广告数据格式错误: 缺少 'ads' 字段");
             return false;
         }
 
         auto ads = j["ads"].get<std::vector<Advertisement>>();
-        std::cout << "同步 " << ads.size() << " 条广告数据到数据库" << std::endl;
+        std::cout << "同步 " << ads.size() << " 条广告元数据到数据库" << std::endl;
 
-        // 开启事务
         db_->beginTransaction();
-
         for (const auto& ad : ads) {
-            // 使用 REPLACE INTO 避免重复插入报错，且能更新数据
             std::string sql = "REPLACE INTO advertisement (ad_id, type, filename, md5, duration, bytes, last_played_time) VALUES ('"
                 + ad.getAdId() + "', '"
                 + ad.getType() + "', '"
@@ -1182,24 +1260,64 @@ bool EdgeManager::loadAds(const json& j) {
                 + ad.getMd5() + "', "
                 + std::to_string(ad.getDuration()) + ", "
                 + std::to_string(ad.getBytes()) + ", "
-                + "0);"; // last_played_time 默认为 0
+                + "0);";
             db_->execute(sql);
+        }
+        db_->commit();
 
-            // 同步后确保素材文件落地到 resources/ads，供播放和完整性校验使用。
-            std::string filePath = config_.resources_dir + "ads/" + ad.getFilename();
-            if (!std::filesystem::exists(filePath)) {
-                if (!network_ || !network_->downloadAdFile(ad.getAdId(), ad.getFilename(), filePath)) {
-                    printInfo(LogLevel::WARNING, "素材下载失败: ad_id=" + ad.getAdId() + ", file=" + filePath);
+        // 根据当前排期按需下载素材
+        std::set<std::string> needed_ads;
+        
+        // 1. 从轮播排期获取
+        auto slots = db_->query("SELECT playlist FROM schedule_timeslot;");
+        for (const auto& row : slots) {
+            try {
+                json playlist = json::parse(row.at("playlist"));
+                for (const auto& id : playlist) {
+                    needed_ads.insert(id.get<std::string>());
                 }
+            } catch (...) {}
+        }
+
+        // 2. 从插播排期获取
+        auto interrupts = db_->query("SELECT ad_id FROM schedule_interrupt;");
+        for (const auto& row : interrupts) {
+            needed_ads.insert(row.at("ad_id"));
+        }
+
+        printInfo(LogLevel::INFO, "当前排期共需 " + std::to_string(needed_ads.size()) + " 个广告素材，开始按需下载...");
+
+        int success_count = 0;
+        for (const auto& ad_id : needed_ads) {
+            auto res = db_->query("SELECT filename FROM advertisement WHERE ad_id = '" + ad_id + "';");
+            if (res.empty()) {
+                printInfo(LogLevel::WARNING, "排期中引用的广告 ID 未在元数据库中找到: " + ad_id);
+                continue;
+            }
+
+            std::string filename = res[0].at("filename");
+            std::string filePath = config_.resources_dir + "ads/" + filename;
+
+            if (std::filesystem::exists(filePath)) {
+                success_count++;
+                continue;
+            }
+
+            if (network_->downloadAdFile(ad_id, filename, filePath)) {
+                success_count++;
+            } else {
+                printInfo(LogLevel::ERROR, "素材下载失败: " + ad_id);
             }
         }
 
-        db_->commit();
+        printInfo(LogLevel::INFO, "素材下载完成，成功: " + std::to_string(success_count) + "/" + std::to_string(needed_ads.size()));
+        network_->reportSyncResult("ads", "success", "广告同步成功，素材已就绪 (" + std::to_string(success_count) + ")");
         return true;
 
     } catch (const std::exception& e) {
         std::cerr << "同步广告数据异常: " << e.what() << std::endl;
         try { db_->rollback(); } catch (...) {}
+        network_->reportSyncResult("ads", "failed", "广告解析入库或下载失败: " + std::string(e.what()));
         return false;
     }
 }
@@ -1210,17 +1328,12 @@ bool EdgeManager::syncSchedule() {
         return false;
     }
     printInfo(LogLevel::INFO, "正在从网关拉取最新排期...");
-    json schedule = network_->fetchSchedule();
-    if (!schedule.is_null() && !schedule.empty()) {
-        bool ok = loadSchedule(schedule);
-        network_->reportSyncResult("schedule", ok ? "success" : "failed", ok ? "排期同步成功" : "排期解析入库失败");
-        return ok;
+    json j = network_->fetchSchedule();
+    if (j.is_null() || j.empty()) {
+        network_->reportSyncResult("schedule", "failed", "拉取排期数据为空或网络错误");
+        return false;
     }
-    network_->reportSyncResult("schedule", "failed", "拉取排期数据为空或网络错误");
-    return false;
-}
 
-bool EdgeManager::loadSchedule(const json& j) {
     try {
         Schedule schedule = Schedule::fromJson(j);
         
@@ -1270,12 +1383,14 @@ bool EdgeManager::loadSchedule(const json& j) {
             db_->execute(slotSQL);
         }
 
-            db_->commit();
-            return true;
+        db_->commit();
+        network_->reportSyncResult("schedule", "success", "排期同步成功");
+        return true;
 
     } catch (const std::exception& e) {
         std::cerr << "同步排期数据异常: " << e.what() << std::endl;
         try { db_->rollback(); } catch (...) {}
+        network_->reportSyncResult("schedule", "failed", "排期解析入库失败: " + std::string(e.what()));
         return false;
     }
 }

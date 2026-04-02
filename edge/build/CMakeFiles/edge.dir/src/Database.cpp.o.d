@@ -1,6 +1,6 @@
 CMakeFiles/edge.dir/src/Database.cpp.o: \
-  /Users/lyuchao/Documents/trae_projects/edge/src/Database.cpp \
-  /Users/lyuchao/Documents/trae_projects/edge/include/Database.hpp \
+  /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/Database.cpp \
+  /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/include/Database.hpp \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/sqlite3.h \
   /Library/Developer/CommandLineTools/usr/lib/clang/17/include/stdarg.h \
   /Library/Developer/CommandLineTools/usr/lib/clang/17/include/__stdarg_header_macro.h \

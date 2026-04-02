@@ -98,42 +98,23 @@ public:
     bool initDatabase();
 
     /**
-     * @brief 同步广告素材数据 (从文件)
+     * @brief 同步广告素材数据 (从网关)
      * 
-     * 读取 Ads.json 配置文件，解析广告元数据并存入 advertisement 表。
+     * 从远程网关拉取广告 JSON，解析并存入 advertisement 表。
+     * 之后根据当前排期表中的播放列表，按需下载缺失的媒体文件。
      * @return true 成功
      * @return false 失败
      */
     bool syncAds();
 
     /**
-     * @brief 同步广告素材数据 (从 JSON 对象)
+     * @brief 同步排期策略数据 (从网关)
      * 
-     * 解析广告 JSON 数据并存入 advertisement 表。
-     * @param adsJson 包含 "ads" 数组的 JSON 对象
-     * @return true 成功
-     * @return false 失败
-     */
-    bool loadAds(const json& adsJson);
-
-    /**
-     * @brief 同步排期策略数据 (从文件)
-     * 
-     * 读取 Schedule.json 配置文件，解析排期策略并存入 schedule 相关表。
+     * 从远程网关拉取排期 JSON，解析并存入本地数据库。
      * @return true 成功
      * @return false 失败
      */
     bool syncSchedule();
-
-    /**
-     * @brief 同步排期策略数据 (从 JSON 对象)
-     * 
-     * 解析排期 JSON 数据并存入 schedule 相关表。
-     * @param scheduleJson 排期策略 JSON 对象
-     * @return true 成功
-     * @return false 失败
-     */
-    bool loadSchedule(const json& scheduleJson);
 
     /**
      * @brief 获取下一个要播放的素材
@@ -181,8 +162,9 @@ public:
      * @param durationMs 播放时长(ms)
      * @param statusCode 状态码 (200/404/500)
      * @param statusMsg 状态信息
+     * @param logType 日志类型 (PLAYBACK/CRASH/COMMAND/SYSTEM)
      */
-    void log(const std::string& adId, const std::string& adFileName, long long startTime, long long endTime, int durationMs, int statusCode, const std::string& statusMsg);
+    void log(const std::string& adId, const std::string& adFileName, long long startTime, long long endTime, int durationMs, int statusCode, const std::string& statusMsg, const std::string& logType = "PLAYBACK");
 
     /**
      * @brief 批量更新日志上传状态

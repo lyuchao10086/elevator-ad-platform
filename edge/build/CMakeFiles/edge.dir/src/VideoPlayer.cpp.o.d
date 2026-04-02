@@ -1,6 +1,6 @@
 CMakeFiles/edge.dir/src/VideoPlayer.cpp.o: \
-  /Users/lyuchao/Documents/trae_projects/edge/src/VideoPlayer.cpp \
-  /Users/lyuchao/Documents/trae_projects/edge/include/VideoPlayer.hpp \
+  /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/VideoPlayer.cpp \
+  /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/include/VideoPlayer.hpp \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/string \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/max.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/comp.h \

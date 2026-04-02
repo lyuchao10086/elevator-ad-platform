@@ -272,8 +272,11 @@ void Watchdog::logFault(const std::string& type, const std::string& message) {
     try {
         std::string logId = generateUUID();
         long long now = getCurrentTimestamp();
-        std::string sql = "INSERT INTO log (log_id, device_id, ad_id, ad_file_name, status_code, status_msg, created_at, uploaded) VALUES ('"
-            + logId + "', '" + config_.device_id + "', 'SYSTEM', 'WATCHDOG', 500, '" + type + ": " + message + "', " + std::to_string(now) + ", 0);";
+        // 增加 log_type 字段，Watchdog 记录的通常是 CRASH 或 SYSTEM 故障
+        std::string logType = (type == "CRASH" || type == "HANG") ? "CRASH" : "SYSTEM";
+        
+        std::string sql = "INSERT INTO log (log_id, device_id, ad_id, ad_file_name, status_code, status_msg, created_at, log_type, uploaded) VALUES ('"
+            + logId + "', '" + config_.device_id + "', 'SYSTEM', 'WATCHDOG', 500, '" + type + ": " + message + "', " + std::to_string(now) + ", '" + logType + "', 0);";
         db_->execute(sql);
         std::cout << "[Watchdog] 已记录故障: " << type << " - " << message << std::endl;
     } catch (...) {}

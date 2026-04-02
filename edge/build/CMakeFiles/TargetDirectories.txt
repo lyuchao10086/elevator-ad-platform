@@ -1,3 +1,3 @@
-/Users/lyuchao/Documents/trae_projects/edge/build/CMakeFiles/edge.dir
-/Users/lyuchao/Documents/trae_projects/edge/build/CMakeFiles/edit_cache.dir
-/Users/lyuchao/Documents/trae_projects/edge/build/CMakeFiles/rebuild_cache.dir
+/Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/build/CMakeFiles/edge.dir
+/Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/build/CMakeFiles/edit_cache.dir
+/Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/build/CMakeFiles/rebuild_cache.dir

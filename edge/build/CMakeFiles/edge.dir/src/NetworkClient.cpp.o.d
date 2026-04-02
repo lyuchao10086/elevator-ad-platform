@@ -1,6 +1,6 @@
 CMakeFiles/edge.dir/src/NetworkClient.cpp.o: \
-  /Users/lyuchao/Documents/trae_projects/edge/src/NetworkClient.cpp \
-  /Users/lyuchao/Documents/trae_projects/edge/include/NetworkClient.hpp \
+  /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/NetworkClient.cpp \
+  /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/include/NetworkClient.hpp \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/string \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/max.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__algorithm/comp.h \
@@ -798,7 +798,7 @@ CMakeFiles/edge.dir/src/NetworkClient.cpp.o: \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/chrono \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__chrono/file_clock.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/forward_list \
-  /Users/lyuchao/Documents/trae_projects/edge/include/nlohmann/json.hpp \
+  /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/include/nlohmann/json.hpp \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/map \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__tree \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/valarray \
@@ -840,7 +840,7 @@ CMakeFiles/edge.dir/src/NetworkClient.cpp.o: \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/execution \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/__type_traits/is_execution_policy.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/any \
-  /Users/lyuchao/Documents/trae_projects/edge/include/httplib.h \
+  /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/include/httplib.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/arpa/inet.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/netinet/in.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/sys/socket.h \

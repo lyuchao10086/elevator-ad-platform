@@ -1,0 +1,3 @@
+/Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/build/CMakeFiles/edge.dir
+/Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/build/CMakeFiles/edit_cache.dir
+/Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/build/CMakeFiles/rebuild_cache.dir

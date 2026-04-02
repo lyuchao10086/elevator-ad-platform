@@ -53,10 +53,10 @@ RM = /opt/homebrew/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /Users/lyuchao/Documents/trae_projects/edge
+CMAKE_SOURCE_DIR = /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /Users/lyuchao/Documents/trae_projects/edge/build
+CMAKE_BINARY_DIR = /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/build
 
 # Include any dependencies generated for this target.
 include CMakeFiles/edge.dir/depend.make
@@ -73,88 +73,88 @@ CMakeFiles/edge.dir/codegen:
 .PHONY : CMakeFiles/edge.dir/codegen
 
 CMakeFiles/edge.dir/src/Database.cpp.o: CMakeFiles/edge.dir/flags.make
-CMakeFiles/edge.dir/src/Database.cpp.o: /Users/lyuchao/Documents/trae_projects/edge/src/Database.cpp
+CMakeFiles/edge.dir/src/Database.cpp.o: /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/Database.cpp
 CMakeFiles/edge.dir/src/Database.cpp.o: CMakeFiles/edge.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/lyuchao/Documents/trae_projects/edge/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/edge.dir/src/Database.cpp.o"
-	/usr/bin/clang++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/edge.dir/src/Database.cpp.o -MF CMakeFiles/edge.dir/src/Database.cpp.o.d -o CMakeFiles/edge.dir/src/Database.cpp.o -c /Users/lyuchao/Documents/trae_projects/edge/src/Database.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/edge.dir/src/Database.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/edge.dir/src/Database.cpp.o -MF CMakeFiles/edge.dir/src/Database.cpp.o.d -o CMakeFiles/edge.dir/src/Database.cpp.o -c /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/Database.cpp
 
 CMakeFiles/edge.dir/src/Database.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/edge.dir/src/Database.cpp.i"
-	/usr/bin/clang++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/lyuchao/Documents/trae_projects/edge/src/Database.cpp > CMakeFiles/edge.dir/src/Database.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/Database.cpp > CMakeFiles/edge.dir/src/Database.cpp.i
 
 CMakeFiles/edge.dir/src/Database.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/edge.dir/src/Database.cpp.s"
-	/usr/bin/clang++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/lyuchao/Documents/trae_projects/edge/src/Database.cpp -o CMakeFiles/edge.dir/src/Database.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/Database.cpp -o CMakeFiles/edge.dir/src/Database.cpp.s
 
 CMakeFiles/edge.dir/src/main.cpp.o: CMakeFiles/edge.dir/flags.make
-CMakeFiles/edge.dir/src/main.cpp.o: /Users/lyuchao/Documents/trae_projects/edge/src/main.cpp
+CMakeFiles/edge.dir/src/main.cpp.o: /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/main.cpp
 CMakeFiles/edge.dir/src/main.cpp.o: CMakeFiles/edge.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/lyuchao/Documents/trae_projects/edge/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/edge.dir/src/main.cpp.o"
-	/usr/bin/clang++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/edge.dir/src/main.cpp.o -MF CMakeFiles/edge.dir/src/main.cpp.o.d -o CMakeFiles/edge.dir/src/main.cpp.o -c /Users/lyuchao/Documents/trae_projects/edge/src/main.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/edge.dir/src/main.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/edge.dir/src/main.cpp.o -MF CMakeFiles/edge.dir/src/main.cpp.o.d -o CMakeFiles/edge.dir/src/main.cpp.o -c /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/main.cpp
 
 CMakeFiles/edge.dir/src/main.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/edge.dir/src/main.cpp.i"
-	/usr/bin/clang++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/lyuchao/Documents/trae_projects/edge/src/main.cpp > CMakeFiles/edge.dir/src/main.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/main.cpp > CMakeFiles/edge.dir/src/main.cpp.i
 
 CMakeFiles/edge.dir/src/main.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/edge.dir/src/main.cpp.s"
-	/usr/bin/clang++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/lyuchao/Documents/trae_projects/edge/src/main.cpp -o CMakeFiles/edge.dir/src/main.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/main.cpp -o CMakeFiles/edge.dir/src/main.cpp.s
 
 CMakeFiles/edge.dir/src/EdgeManager.cpp.o: CMakeFiles/edge.dir/flags.make
-CMakeFiles/edge.dir/src/EdgeManager.cpp.o: /Users/lyuchao/Documents/trae_projects/edge/src/EdgeManager.cpp
+CMakeFiles/edge.dir/src/EdgeManager.cpp.o: /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/EdgeManager.cpp
 CMakeFiles/edge.dir/src/EdgeManager.cpp.o: CMakeFiles/edge.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/lyuchao/Documents/trae_projects/edge/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/edge.dir/src/EdgeManager.cpp.o"
-	/usr/bin/clang++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/edge.dir/src/EdgeManager.cpp.o -MF CMakeFiles/edge.dir/src/EdgeManager.cpp.o.d -o CMakeFiles/edge.dir/src/EdgeManager.cpp.o -c /Users/lyuchao/Documents/trae_projects/edge/src/EdgeManager.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/edge.dir/src/EdgeManager.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/edge.dir/src/EdgeManager.cpp.o -MF CMakeFiles/edge.dir/src/EdgeManager.cpp.o.d -o CMakeFiles/edge.dir/src/EdgeManager.cpp.o -c /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/EdgeManager.cpp
 
 CMakeFiles/edge.dir/src/EdgeManager.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/edge.dir/src/EdgeManager.cpp.i"
-	/usr/bin/clang++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/lyuchao/Documents/trae_projects/edge/src/EdgeManager.cpp > CMakeFiles/edge.dir/src/EdgeManager.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/EdgeManager.cpp > CMakeFiles/edge.dir/src/EdgeManager.cpp.i
 
 CMakeFiles/edge.dir/src/EdgeManager.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/edge.dir/src/EdgeManager.cpp.s"
-	/usr/bin/clang++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/lyuchao/Documents/trae_projects/edge/src/EdgeManager.cpp -o CMakeFiles/edge.dir/src/EdgeManager.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/EdgeManager.cpp -o CMakeFiles/edge.dir/src/EdgeManager.cpp.s
 
 CMakeFiles/edge.dir/src/VideoPlayer.cpp.o: CMakeFiles/edge.dir/flags.make
-CMakeFiles/edge.dir/src/VideoPlayer.cpp.o: /Users/lyuchao/Documents/trae_projects/edge/src/VideoPlayer.cpp
+CMakeFiles/edge.dir/src/VideoPlayer.cpp.o: /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/VideoPlayer.cpp
 CMakeFiles/edge.dir/src/VideoPlayer.cpp.o: CMakeFiles/edge.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/lyuchao/Documents/trae_projects/edge/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object CMakeFiles/edge.dir/src/VideoPlayer.cpp.o"
-	/usr/bin/clang++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/edge.dir/src/VideoPlayer.cpp.o -MF CMakeFiles/edge.dir/src/VideoPlayer.cpp.o.d -o CMakeFiles/edge.dir/src/VideoPlayer.cpp.o -c /Users/lyuchao/Documents/trae_projects/edge/src/VideoPlayer.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object CMakeFiles/edge.dir/src/VideoPlayer.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/edge.dir/src/VideoPlayer.cpp.o -MF CMakeFiles/edge.dir/src/VideoPlayer.cpp.o.d -o CMakeFiles/edge.dir/src/VideoPlayer.cpp.o -c /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/VideoPlayer.cpp
 
 CMakeFiles/edge.dir/src/VideoPlayer.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/edge.dir/src/VideoPlayer.cpp.i"
-	/usr/bin/clang++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/lyuchao/Documents/trae_projects/edge/src/VideoPlayer.cpp > CMakeFiles/edge.dir/src/VideoPlayer.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/VideoPlayer.cpp > CMakeFiles/edge.dir/src/VideoPlayer.cpp.i
 
 CMakeFiles/edge.dir/src/VideoPlayer.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/edge.dir/src/VideoPlayer.cpp.s"
-	/usr/bin/clang++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/lyuchao/Documents/trae_projects/edge/src/VideoPlayer.cpp -o CMakeFiles/edge.dir/src/VideoPlayer.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/VideoPlayer.cpp -o CMakeFiles/edge.dir/src/VideoPlayer.cpp.s
 
 CMakeFiles/edge.dir/src/NetworkClient.cpp.o: CMakeFiles/edge.dir/flags.make
-CMakeFiles/edge.dir/src/NetworkClient.cpp.o: /Users/lyuchao/Documents/trae_projects/edge/src/NetworkClient.cpp
+CMakeFiles/edge.dir/src/NetworkClient.cpp.o: /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/NetworkClient.cpp
 CMakeFiles/edge.dir/src/NetworkClient.cpp.o: CMakeFiles/edge.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/lyuchao/Documents/trae_projects/edge/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/edge.dir/src/NetworkClient.cpp.o"
-	/usr/bin/clang++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/edge.dir/src/NetworkClient.cpp.o -MF CMakeFiles/edge.dir/src/NetworkClient.cpp.o.d -o CMakeFiles/edge.dir/src/NetworkClient.cpp.o -c /Users/lyuchao/Documents/trae_projects/edge/src/NetworkClient.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/edge.dir/src/NetworkClient.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/edge.dir/src/NetworkClient.cpp.o -MF CMakeFiles/edge.dir/src/NetworkClient.cpp.o.d -o CMakeFiles/edge.dir/src/NetworkClient.cpp.o -c /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/NetworkClient.cpp
 
 CMakeFiles/edge.dir/src/NetworkClient.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/edge.dir/src/NetworkClient.cpp.i"
-	/usr/bin/clang++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/lyuchao/Documents/trae_projects/edge/src/NetworkClient.cpp > CMakeFiles/edge.dir/src/NetworkClient.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/NetworkClient.cpp > CMakeFiles/edge.dir/src/NetworkClient.cpp.i
 
 CMakeFiles/edge.dir/src/NetworkClient.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/edge.dir/src/NetworkClient.cpp.s"
-	/usr/bin/clang++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/lyuchao/Documents/trae_projects/edge/src/NetworkClient.cpp -o CMakeFiles/edge.dir/src/NetworkClient.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/NetworkClient.cpp -o CMakeFiles/edge.dir/src/NetworkClient.cpp.s
 
 CMakeFiles/edge.dir/src/Watchdog.cpp.o: CMakeFiles/edge.dir/flags.make
-CMakeFiles/edge.dir/src/Watchdog.cpp.o: /Users/lyuchao/Documents/trae_projects/edge/src/Watchdog.cpp
+CMakeFiles/edge.dir/src/Watchdog.cpp.o: /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/Watchdog.cpp
 CMakeFiles/edge.dir/src/Watchdog.cpp.o: CMakeFiles/edge.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/lyuchao/Documents/trae_projects/edge/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/edge.dir/src/Watchdog.cpp.o"
-	/usr/bin/clang++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/edge.dir/src/Watchdog.cpp.o -MF CMakeFiles/edge.dir/src/Watchdog.cpp.o.d -o CMakeFiles/edge.dir/src/Watchdog.cpp.o -c /Users/lyuchao/Documents/trae_projects/edge/src/Watchdog.cpp
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/edge.dir/src/Watchdog.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/edge.dir/src/Watchdog.cpp.o -MF CMakeFiles/edge.dir/src/Watchdog.cpp.o.d -o CMakeFiles/edge.dir/src/Watchdog.cpp.o -c /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/Watchdog.cpp
 
 CMakeFiles/edge.dir/src/Watchdog.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/edge.dir/src/Watchdog.cpp.i"
-	/usr/bin/clang++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/lyuchao/Documents/trae_projects/edge/src/Watchdog.cpp > CMakeFiles/edge.dir/src/Watchdog.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/Watchdog.cpp > CMakeFiles/edge.dir/src/Watchdog.cpp.i
 
 CMakeFiles/edge.dir/src/Watchdog.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/edge.dir/src/Watchdog.cpp.s"
-	/usr/bin/clang++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/lyuchao/Documents/trae_projects/edge/src/Watchdog.cpp -o CMakeFiles/edge.dir/src/Watchdog.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/src/Watchdog.cpp -o CMakeFiles/edge.dir/src/Watchdog.cpp.s
 
 # Object files for target edge
 edge_OBJECTS = \
@@ -183,7 +183,7 @@ edge: /opt/homebrew/Cellar/ffmpeg/7.1.1_2/lib/libavcodec.dylib
 edge: /opt/homebrew/Cellar/ffmpeg/7.1.1_2/lib/libswscale.dylib
 edge: /opt/homebrew/Cellar/ffmpeg/7.1.1_2/lib/libavutil.dylib
 edge: CMakeFiles/edge.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/Users/lyuchao/Documents/trae_projects/edge/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Linking CXX executable edge"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Linking CXX executable edge"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/edge.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.
@@ -195,6 +195,6 @@ CMakeFiles/edge.dir/clean:
 .PHONY : CMakeFiles/edge.dir/clean
 
 CMakeFiles/edge.dir/depend:
-	cd /Users/lyuchao/Documents/trae_projects/edge/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /Users/lyuchao/Documents/trae_projects/edge /Users/lyuchao/Documents/trae_projects/edge /Users/lyuchao/Documents/trae_projects/edge/build /Users/lyuchao/Documents/trae_projects/edge/build /Users/lyuchao/Documents/trae_projects/edge/build/CMakeFiles/edge.dir/DependInfo.cmake "--color=$(COLOR)"
+	cd /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/build /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/build /Users/lyuchao/Desktop/NOW/git/elevator-ad-platform/edge/build/CMakeFiles/edge.dir/DependInfo.cmake "--color=$(COLOR)"
 .PHONY : CMakeFiles/edge.dir/depend
 
