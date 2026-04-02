@@ -1,3 +1,0 @@
-/mnt/d/adver_system/elevator-ad-platform/edge/build/CMakeFiles/edge.dir
-/mnt/d/adver_system/elevator-ad-platform/edge/build/CMakeFiles/edit_cache.dir
-/mnt/d/adver_system/elevator-ad-platform/edge/build/CMakeFiles/rebuild_cache.dir

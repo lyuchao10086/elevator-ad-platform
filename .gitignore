@@ -371,3 +371,10 @@ control-plane/data/materials/*
 !control-plane/data/materials/.gitkeep
 
 cloud/.env
+
+# CMake build artifacts
+build/
+edge/build/
+edge/resources/*.db
+edge/winbuild/
+.cmake/
