@@ -27,6 +27,7 @@
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
+#include <unordered_map>
 
 using json = nlohmann::json;
 
@@ -233,6 +234,8 @@ private:
     size_t current_playlist_index_ = 0;
     // 上次播放的 timeslot ID，用于重置索引
     int last_timeslot_id_ = -1;
+    // 同优先级广告组的轮转索引，key: slot_id:priority
+    std::unordered_map<std::string, size_t> slot_priority_rr_index_;
 
     /**
      * @brief 检查当前时间是否在指定的时间段内

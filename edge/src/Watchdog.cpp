@@ -7,6 +7,15 @@
 #include <random>
 #include <iomanip>
 #include <sstream>
+#include <csignal>
+
+namespace {
+std::atomic<bool> g_watchdogStopRequested{false};
+
+void handleStopSignal(int) {
+    g_watchdogStopRequested = true;
+}
+}
 
 #ifdef _WIN32
 #include <ws2tcpip.h>
@@ -18,6 +27,7 @@ typedef int socklen_t;
 #include <sys/wait.h>
 #include <unistd.h>
 #include <signal.h>
+#include <cerrno>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -119,6 +129,10 @@ void Watchdog::stopPlayer() {
 void Watchdog::run() {
     std::cout << "[Watchdog] 守护进程启动..." << std::endl;
 
+    // 支持外部 Ctrl+C/SIGTERM 强制退出
+    std::signal(SIGINT, handleStopSignal);
+    std::signal(SIGTERM, handleStopSignal);
+
     // 1. 启动本地心跳监听服务器 (UDP)
     std::thread localSrv(&Watchdog::localHeartbeatServer, this);
     localSrv.detach();
@@ -162,11 +176,25 @@ void Watchdog::run() {
 
     // 4. 进入监控循环
     monitorLoop();
+
+    should_exit_ = true;
+    stopPlayer();
+    std::cout << "[Watchdog] 收到退出信号，守护进程已停止" << std::endl;
 }
 
 void Watchdog::monitorLoop() {
     while (!should_exit_) {
-        std::this_thread::sleep_for(std::chrono::seconds(5));
+        for (int i = 0; i < 50 && !should_exit_; ++i) {
+            if (g_watchdogStopRequested.load()) {
+                should_exit_ = true;
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        if (should_exit_) {
+            break;
+        }
 
         // 1. 检查进程是否还在
         if (player_pid_ > 0) {
@@ -176,7 +204,21 @@ void Watchdog::monitorLoop() {
                 DWORD exitCode;
                 if (GetExitCodeProcess(hProcess, &exitCode)) {
                     if (exitCode != STILL_ACTIVE) {
-                        std::cout << "[Watchdog] 播放器进程已退出 (ExitCode: " << exitCode << ")" << std::endl;
+                        if (g_watchdogStopRequested.load()) {
+                            should_exit_ = true;
+                            CloseHandle(hProcess);
+                            break;
+                        }
+                        // ExitCode=0 视为主动关闭，不自动拉起
+                        if (exitCode == 0) {
+                            std::cout << "[Watchdog] 播放器进程主动关闭 (ExitCode: 0)，守护进程不自动拉起" << std::endl;
+                            player_pid_ = -1;
+                            should_exit_ = true;
+                            CloseHandle(hProcess);
+                            break;
+                        }
+
+                        std::cout << "[Watchdog] 播放器进程异常退出 (ExitCode: " << exitCode << ")，准备自动拉起" << std::endl;
                         logFault("CRASH", "播放器进程异常退出");
                         player_pid_ = -1;
                         startPlayer();
@@ -202,16 +244,45 @@ void Watchdog::monitorLoop() {
             int status;
             pid_t result = waitpid(player_pid_, &status, WNOHANG);
             if (result == -1) {
+                if (g_watchdogStopRequested.load()) {
+                    should_exit_ = true;
+                    break;
+                }
+                if (errno == ECHILD) {
+                    std::cout << "[Watchdog] 播放器进程已被回收，按主动关闭处理，不自动拉起" << std::endl;
+                    player_pid_ = -1;
+                    should_exit_ = true;
+                    break;
+                }
                 logFault("CRASH", "播放器进程异常退出");
                 player_pid_ = -1;
                 startPlayer();
             } else if (result > 0) {
+                if (g_watchdogStopRequested.load()) {
+                    should_exit_ = true;
+                    break;
+                }
                 // 进程已退出
                 if (WIFEXITED(status)) {
-                    std::cout << "[Watchdog] 播放器进程正常退出 (Status: " << WEXITSTATUS(status) << ")" << std::endl;
+                    int code = WEXITSTATUS(status);
+                    if (code == 0) {
+                        std::cout << "[Watchdog] 播放器进程主动关闭 (exit=0)，守护进程不自动拉起" << std::endl;
+                        player_pid_ = -1;
+                        should_exit_ = true;
+                        break;
+                    }
+                    std::cout << "[Watchdog] 播放器进程异常退出 (Status: " << code << ")，准备自动拉起" << std::endl;
+                    logFault("CRASH", "播放器进程异常退出, code=" + std::to_string(code));
                 } else if (WIFSIGNALED(status)) {
-                    std::cout << "[Watchdog] 播放器进程被信号终止 (Signal: " << WTERMSIG(status) << ")" << std::endl;
-                    logFault("CRASH", "播放器进程被信号终止");
+                    int sig = WTERMSIG(status);
+                    if (sig == SIGTERM || sig == SIGINT) {
+                        std::cout << "[Watchdog] 播放器进程主动关闭 (signal=" << sig << ")，守护进程不自动拉起" << std::endl;
+                        player_pid_ = -1;
+                        should_exit_ = true;
+                        break;
+                    }
+                    std::cout << "[Watchdog] 播放器进程异常被信号终止 (Signal: " << sig << ")，准备自动拉起" << std::endl;
+                    logFault("CRASH", "播放器进程被信号终止, signal=" + std::to_string(sig));
                 }
                 player_pid_ = -1;
                 startPlayer();
@@ -227,6 +298,10 @@ void Watchdog::monitorLoop() {
             }
 #endif
         } else {
+            if (g_watchdogStopRequested.load()) {
+                should_exit_ = true;
+                break;
+            }
             startPlayer();
         }
     }
@@ -297,6 +372,8 @@ void Watchdog::handleCloudCommand(const json& msg, std::function<void(const json
         resp["device_id"] = config_.device_id;
         resp["ts"] = getCurrentTimestamp();
         resp["payload"] = {{"status", "success"}, {"result", "rebooting"}};
+        std::cout << "[Watchdog] 回执发送地址: " << config_.gateway_ws_url << std::endl;
+        std::cout << "[Watchdog] 回执内容: " << resp.dump() << std::endl;
         send(resp);
     } else {
         // 转发指令到播放器 (UDP 9998)
@@ -332,6 +409,8 @@ void Watchdog::handleCloudCommand(const json& msg, std::function<void(const json
             if (n > 0) {
                 try {
                     json reply = json::parse(std::string(buffer, n));
+                    std::cout << "[Watchdog] 回执发送地址: " << config_.gateway_ws_url << std::endl;
+                    std::cout << "[Watchdog] 回执内容: " << reply.dump() << std::endl;
                     send(reply);
                     std::cout << "[Watchdog] 转发指令回执成功" << std::endl;
                 } catch (...) {}

@@ -141,7 +141,6 @@ void NetworkClient::wsLoop(std::string wsUrl, std::string deviceId, std::string 
                     
                     if (res == httplib::ws::ReadResult::Text || res == httplib::ws::ReadResult::Binary) {
                         // 收到消息
-                        std::cout << "[NetworkClient] 收到网关消息: " << msg << std::endl;
                         try {
                             json j = json::parse(msg);
                             if (onMessage) {
@@ -308,6 +307,63 @@ NetworkClient::DownloadResult NetworkClient::downloadAdFileDetailed(const std::s
 
 bool NetworkClient::downloadAdFile(const std::string& adId, const std::string& filename, const std::string& savePath) {
     return downloadAdFileDetailed(adId, filename, savePath).success;
+}
+
+NetworkClient::DownloadResult NetworkClient::downloadFileFromUrlDetailed(const std::string& url, const std::string& savePath) {
+    if (url.empty() || savePath.empty()) {
+        return {false, 0, "invalid_argument"};
+    }
+
+    try {
+        std::filesystem::path p(savePath);
+        auto parent = p.parent_path();
+        if (!parent.empty()) {
+            std::filesystem::create_directories(parent);
+        }
+
+        auto schemePos = url.find("://");
+        if (schemePos == std::string::npos) {
+            return {false, 0, "invalid_url"};
+        }
+        auto hostStart = schemePos + 3;
+        auto pathPos = url.find('/', hostStart);
+        std::string base = (pathPos == std::string::npos) ? url : url.substr(0, pathPos);
+        std::string path = (pathPos == std::string::npos) ? "/" : url.substr(pathPos);
+
+        httplib::Client cli(base.c_str());
+        cli.set_follow_location(true);
+
+        auto res = cli.Get(path.c_str());
+        if (!res) {
+            std::cerr << "[NetworkClient] 直链下载失败 url=" << url << " status=无法连接" << std::endl;
+            return {false, 0, "network_failure"};
+        }
+        if (res->status != 200) {
+            std::cerr << "[NetworkClient] 直链下载失败 url=" << url << " status=" << res->status << std::endl;
+            if (res->status == 404) {
+                return {false, 404, "http_404"};
+            }
+            return {false, res->status, "http_error"};
+        }
+
+        std::ofstream ofs(savePath, std::ios::binary);
+        if (!ofs.is_open()) {
+            std::cerr << "[NetworkClient] 直链下载写文件失败: " << savePath << std::endl;
+            return {false, 0, "write_file_failed"};
+        }
+        ofs.write(res->body.data(), static_cast<std::streamsize>(res->body.size()));
+        ofs.close();
+
+        std::cout << "[NetworkClient] 直链下载成功 url=" << url << " -> " << savePath << std::endl;
+        return {true, 200, "ok"};
+    } catch (const std::exception& e) {
+        std::cerr << "[NetworkClient] 直链下载异常 url=" << url << " err=" << e.what() << std::endl;
+        return {false, 0, std::string("exception: ") + e.what()};
+    }
+}
+
+bool NetworkClient::downloadFileFromUrl(const std::string& url, const std::string& savePath) {
+    return downloadFileFromUrlDetailed(url, savePath).success;
 }
 
 bool NetworkClient::reportSyncResult(const std::string& type, const std::string& status, const std::string& detail) {

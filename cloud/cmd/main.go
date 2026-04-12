@@ -68,6 +68,7 @@ func main() {
 	http.HandleFunc("/api/schedule", handler.GetSchedule)
 	http.HandleFunc("/api/ads", handler.GetAds)
 	http.HandleFunc("/api/material/file", handler.GetMaterialFile)
+	http.HandleFunc("/api/sync/report", handler.ReportSyncResult)
 
 	log.Println("网关启动在 :8080")
 	http.ListenAndServe(":8080", nil) //实现websocket/HTTP监听功能

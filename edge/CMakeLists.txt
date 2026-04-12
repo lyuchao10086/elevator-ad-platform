@@ -24,6 +24,9 @@ pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavformat libavcodec libavut
 # 查找 SDL2 库
 find_package(SDL2 CONFIG REQUIRED)
 
+# 为 cpp-httplib 启用 HTTPS 支持
+find_package(OpenSSL REQUIRED)
+
 # 添加可执行文件
 add_executable(edge 
     src/Database.cpp 
@@ -69,4 +72,15 @@ target_link_libraries(edge
     PkgConfig::FFMPEG
     SDL2::SDL2
     SDL2::SDL2main
+    OpenSSL::SSL
+    OpenSSL::Crypto
 )
+
+if(APPLE)
+    target_link_libraries(edge
+        "-framework CoreFoundation"
+        "-framework Security"
+    )
+endif()
+
+target_compile_definitions(edge PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
