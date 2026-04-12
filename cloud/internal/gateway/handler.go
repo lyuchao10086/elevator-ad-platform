@@ -646,6 +646,46 @@ func (h *Handler) GetMaterialFile(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, localPath)
 }
 
+// ReportSyncResult 接收边端同步结果回执，供运维排障与统计使用
+func (h *Handler) ReportSyncResult(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	deviceID, ok := h.validateDeviceRequest(w, r)
+	if !ok {
+		return
+	}
+
+	var payload struct {
+		DeviceID  string `json:"device_id"`
+		Type      string `json:"type"`
+		Status    string `json:"status"`
+		Detail    string `json:"detail"`
+		Timestamp int64  `json:"timestamp"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
+	if strings.TrimSpace(payload.DeviceID) != "" && payload.DeviceID != deviceID {
+		http.Error(w, "device_id mismatch", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("[sync_report] device=%s type=%s status=%s detail=%s ts=%d", deviceID, payload.Type, payload.Status, payload.Detail, payload.Timestamp)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"code":      0,
+		"message":   "ok",
+		"device_id": deviceID,
+	})
+}
+
 func (h *Handler) extractDeviceID(r *http.Request) string {
 	deviceID := strings.TrimSpace(r.URL.Query().Get("device_id"))
 	if deviceID != "" {

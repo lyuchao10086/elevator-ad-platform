@@ -60,6 +60,7 @@ def _normalize_insert_play_params(payload: Dict[str, Any]) -> Dict[str, Any]:
     material_name = raw.get("material_name", raw.get("ad_name"))
     material_id = raw.get("material_id")
     ad_id = raw.get("ad_id")
+    oss_url = raw.get("oss_url")
 
     if isinstance(material_name, str) and material_name.strip():
         material_name = material_name.strip()
@@ -75,6 +76,11 @@ def _normalize_insert_play_params(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     if not material_name and not material_id:
         raise HTTPException(status_code=400, detail="params.material_name is required for insert_play")
+
+    if isinstance(oss_url, str) and oss_url.strip():
+        oss_url = oss_url.strip()
+    else:
+        oss_url = None
 
     priority = raw.get("priority", 5)
     if not isinstance(priority, int) or priority < 0 or priority > 9:
@@ -109,6 +115,8 @@ def _normalize_insert_play_params(payload: Dict[str, Any]) -> Dict[str, Any]:
         out["ad_name"] = material_name
     if material_id:
         out["material_id"] = material_id
+    if oss_url:
+        out["oss_url"] = oss_url
 
     if duration_sec is not None:
         out["duration_sec"] = duration_sec
@@ -221,6 +229,8 @@ async def send_command(payload: Dict[str, Any] = Body(...)):
             if "material_name" in insert_params:
                 data["material_name"] = insert_params["material_name"]
                 data["ad_name"] = insert_params["material_name"]
+            if "oss_url" in insert_params:
+                data["oss_url"] = insert_params["oss_url"]
             if "duration_sec" in insert_params:
                 data["duration_sec"] = insert_params["duration_sec"]
             if "reason" in insert_params:

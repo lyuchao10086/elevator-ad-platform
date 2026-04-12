@@ -379,7 +379,9 @@ export default {
     })
 
     function selectMaterial(m){
+      params.material_id = m.material_id
       params.material_name = m.file_name || m.name || m.material_id
+      params.oss_url = m.oss_url || ''
       selectedMaterial.value = m.material_id
     }
     const selectedMaterial = ref(null)
@@ -628,7 +630,6 @@ export default {
           expire_sec: expireSec.value
         }
         if(selectedAction.value === 'insert_play'){
-          delete payload.params.material_id
           payload.params.is_emergency = !!payload.params.is_emergency
           payload.params.is_emergicy = payload.params.is_emergency
         }
@@ -673,20 +674,34 @@ export default {
       const start = Date.now()
       while((Date.now() - start) / 1000 < timeoutSec){
         try{
-          const r = await listCommands({ limit: 100 })
+          // 按 cmd_id 精确检索，避免仅看最新 N 条导致的误判超时。
+          const r = await listCommands({ limit: 20, q: cmdId })
           const items = r.data?.items || r.data || []
-          const rec = items.find(x => x.cmd_id === cmdId)
-          if(rec){
-            if(rec.status === 'success'){
-              // 可选：在前端展示更友好的消息
-              alert('指令执行成功: ' + cmdId)
+          const toStatus = (s) => (s || '').toString().trim().toLowerCase()
+          const successSet = new Set(['success', 'completed', 'done', 'ok'])
+          const failSet = new Set(['failed', 'timeout', 'error'])
+
+          const related = items.filter(x => {
+            const id = (x.cmd_id || '').toString()
+            return id === cmdId || id.startsWith(`${cmdId}:`)
+          })
+
+          if(related.length > 0){
+            const statuses = related.map(x => toStatus(x.status))
+            const terminalCount = statuses.filter(st => successSet.has(st) || failSet.has(st)).length
+            const failedCount = statuses.filter(st => failSet.has(st)).length
+
+            // 批量场景：全部子命令进入终态后再给出最终结果。
+            if(terminalCount === related.length){
+              if(failedCount === 0){
+                alert('指令执行成功: ' + cmdId)
+              }else if(failedCount === related.length){
+                alert(`指令执行失败: ${cmdId}，失败 ${failedCount}/${related.length}`)
+              }else{
+                alert(`指令部分成功: ${cmdId}，失败 ${failedCount}/${related.length}`)
+              }
               await fetchCommands()
-              return rec
-            }
-            if(rec.status === 'failed' || rec.status === 'timeout'){
-              alert('指令执行失败: ' + cmdId + '，状态：' + rec.status)
-              await fetchCommands()
-              return rec
+              return related
             }
           }
         }catch(err){ console.warn('poll error', err) }
