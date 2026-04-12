@@ -247,6 +247,9 @@ def _build_edge_schedule(schedule_json: Dict[str, Any]) -> Dict[str, Any]:
             "download_retry_count": 3,
             "report_interval_sec": 60,
         },
+        # 保留云端原始广告列表，避免 edge 侧只拿到聚合后的 timeslot priority
+        # 该字段不影响旧版 edge 解析，但能让下发 payload 保留每个广告的原始 priority。
+        "playlist_raw": playlist,
         "interrupts": interrupts if isinstance(interrupts, list) else [],
         "time_slots": time_slots,
     }

@@ -97,13 +97,29 @@
               </div>
 
               <div v-else-if="selectedAction==='capture'" style="padding:12px;">
-                <div style="font-size:13px;color:#7b8793;">截屏结果</div>
-                <div style="margin-top:8px;border:1px dashed #e6eefc;height:220px;display:flex;align-items:center;justify-content:center;color:#9aa6b6;">
-                  <div v-if="sending && !snapshotUrl" style="color:#7b8793">请求已发送，等待设备上传截图...</div>
-                  <div v-else-if="snapshotUrl">
-                    <img :src="snapshotUrl" alt="snapshot" style="max-height:100%;max-width:100%;object-fit:contain;" />
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <div style="font-size:13px;color:#7b8793;">截屏结果（多设备）</div>
+                  <div v-if="currentSnapshot" style="font-size:12px;color:#4a5566;background:#eef4ff;border-radius:999px;padding:2px 10px;">
+                    设备：{{ currentSnapshot.deviceId }}
                   </div>
-                  <div v-else style="color:#9aa6b6">尚未截屏或未返回图片</div>
+                </div>
+                <div style="margin-top:8px;border:1px dashed #e6eefc;height:220px;display:flex;align-items:center;justify-content:center;color:#9aa6b6;position:relative;">
+                  <div v-if="!currentSnapshot" style="color:#9aa6b6">尚未截屏或未返回图片</div>
+                  <div v-else-if="currentSnapshot.status==='pending'" style="color:#7b8793">正在等待设备 {{ currentSnapshot.deviceId }} 上传截图...</div>
+                  <div v-else-if="currentSnapshot.url">
+                    <img :src="currentSnapshot.url" alt="snapshot" style="max-height:100%;max-width:100%;object-fit:contain;" />
+                  </div>
+                  <div v-else style="color:#d9534f">{{ currentSnapshot.message || '截图失败或超时' }}</div>
+                </div>
+                <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
+                  <div style="font-size:12px;color:#9aa6b6;">
+                    <span v-if="snapshotResults.length">{{ activeSnapshotIndex + 1 }} / {{ snapshotResults.length }}</span>
+                    <span v-else>0 / 0</span>
+                  </div>
+                  <div style="display:flex;gap:8px;align-items:center;">
+                    <el-button size="mini" :disabled="!canPrevSnapshot" @click="prevSnapshot">←</el-button>
+                    <el-button size="mini" :disabled="!canNextSnapshot" @click="nextSnapshot">→</el-button>
+                  </div>
                 </div>
               </div>
 
@@ -135,6 +151,10 @@
                     </div>
                     <div v-if="materialsFiltered.length===0" style="color:#9aa6b6;padding:12px;">未找到素材</div>
                   </div>
+                </div>
+                <div style="margin-top:10px;padding-top:10px;border-top:1px dashed #e6eefc;display:flex;align-items:center;justify-content:space-between;">
+                  <div style="font-size:13px;color:#6b7786;">勾选后按紧急插播下发。</div>
+                  <el-checkbox v-model="params.is_emergency">紧急插播</el-checkbox>
                 </div>
               </div>
 
@@ -285,7 +305,7 @@ const ACTION_TEMPLATES = [
   { key: 'reboot', title: '重启', description: '立即重启设备', fields: [] },
   { key: 'set_volume', title: '设置音量', description: '调整设备音量（0-100）', fields: [ { key:'volume', label:'音量', hint:'0-100', type:'number', props:{min:0,max:100} } ] },
   { key: 'capture', title: '截屏', description: '让设备截取当前屏幕并上传', fields: [ { key:'save_to', label:'保存位置', hint:'例如: /screenshots/1.jpg', type:'text' } ] },
-  { key: 'insert_play', title: '视频插播', description: '临时插播一段视频素材', fields: [ { key:'material_id', label:'素材ID', hint:'选择已上传的视频素材', type:'text' }, { key:'priority', label:'优先级', hint:'0-9，越大优先级越高', type:'number', props:{min:0,max:9} } ] }
+  { key: 'insert_play', title: '视频插播', description: '临时插播一段视频素材', fields: [ { key:'material_name', label:'广告名', hint:'选择广告后自动填充', type:'text' }, { key:'priority', label:'优先级', hint:'0-9，越大优先级越高', type:'number', props:{min:0,max:9} }, { key:'is_emergency', label:'紧急插播', type:'boolean', default:false } ] }
 ]
 
 export default {
@@ -311,7 +331,11 @@ export default {
     // params
     const paramTemplate = computed(()=> actions.find(a=>a.key===selectedAction.value) || null)
     const params = reactive({})
-    const snapshotUrl = ref('')
+    const snapshotResults = ref([])
+    const activeSnapshotIndex = ref(0)
+    const currentSnapshot = computed(() => snapshotResults.value[activeSnapshotIndex.value] || null)
+    const canPrevSnapshot = computed(() => snapshotResults.value.length > 1 && activeSnapshotIndex.value > 0)
+    const canNextSnapshot = computed(() => snapshotResults.value.length > 1 && activeSnapshotIndex.value < snapshotResults.value.length - 1)
     const expireSec = ref(60)
 
     // confirmation & sending
@@ -354,7 +378,10 @@ export default {
       return materials.value.filter(m => (m.material_id||'').toLowerCase().includes(q) || (m.file_name||'').toLowerCase().includes(q) )
     })
 
-    function selectMaterial(m){ params.material_id = m.material_id; selectedMaterial.value = m.material_id }
+    function selectMaterial(m){
+      params.material_name = m.file_name || m.name || m.material_id
+      selectedMaterial.value = m.material_id
+    }
     const selectedMaterial = ref(null)
     function materialItemStyle(m){ return selectedMaterial.value===m.material_id ? { boxShadow:'0 8px 24px rgba(47,140,255,0.06)', border:'1px solid rgba(47,140,255,0.12)' } : {} }
     function onPreviewMaterial(m){ window.open(m.oss_url || '#') }
@@ -438,7 +465,8 @@ export default {
       // clear selected devices and action
       selectedDevices.value = []
       selectedAction.value = ''
-      snapshotUrl.value = ''
+      snapshotResults.value = []
+      activeSnapshotIndex.value = 0
       // clear material selection and queries
       selectedMaterial.value = null
       materialQuery.value = ''
@@ -470,10 +498,6 @@ export default {
         }
         if(hasDevices && !hasAction){
           return alert('未选择指令：请在中间栏选择一个指令')
-        }
-        // 若是截屏动作，要求仅选择单台设备；多设备截屏应逐台发送
-        if(selectedAction.value === 'capture' && Array.isArray(devicesArr) && devicesArr.length !== 1){
-          return alert('截屏操作只支持选择单台设备，请仅选择一台设备后重试')
         }
         // 检查所选设备是否在线（仅当 devices 列表里能找到该设备且 status === 'online' 时视为在线）
         const offlineList = (devicesArr || []).filter(id => {
@@ -541,13 +565,49 @@ export default {
           const rec = Array.isArray(items) && items.length ? items[0] : null
           const url = tryExtractSnapshotUrl(rec?.result)
           if(url){
-            snapshotUrl.value = url
             return url
           }
         }catch(err){ console.warn('pollSnapshotResultByDevice error', err) }
         await new Promise(res => setTimeout(res, intervalMs))
       }
       return ''
+    }
+
+    function prevSnapshot(){
+      if(canPrevSnapshot.value) activeSnapshotIndex.value -= 1
+    }
+
+    function nextSnapshot(){
+      if(canNextSnapshot.value) activeSnapshotIndex.value += 1
+    }
+
+    function upsertSnapshotResult(deviceId, patch){
+      const idx = snapshotResults.value.findIndex(x => x.deviceId === deviceId)
+      if(idx === -1){
+        snapshotResults.value.push({ deviceId, url: '', status: 'pending', message: '', ...patch })
+      }else{
+        snapshotResults.value[idx] = { ...snapshotResults.value[idx], ...patch }
+      }
+    }
+
+    async function captureForDevice(deviceId){
+      try{
+        const snapRes = await api.get(`/v1/devices/remote/${deviceId}/snapshot`, { timeout: 35000 })
+        const url = tryExtractSnapshotUrl(snapRes.data?.snapshot_url || snapRes.data?.url || snapRes.data)
+        if(url){
+          return { status: 'success', url: url }
+        }
+        return { status: 'failed', message: '接口未返回有效截图地址' }
+      }catch(e){
+        if(e?.code === 'ECONNABORTED' || /timeout/i.test(e?.message || '')){
+          const delayedUrl = await pollSnapshotResultByDevice(deviceId)
+          if(delayedUrl){
+            return { status: 'success', url: delayedUrl }
+          }
+          return { status: 'timeout', message: '截图回传超时' }
+        }
+        return { status: 'failed', message: e?.response?.data?.detail || e?.message || '截图请求失败' }
+      }
     }
 
     async function onSend(){
@@ -567,29 +627,32 @@ export default {
           send_ts: Math.floor(Date.now()/1000),
           expire_sec: expireSec.value
         }
+        if(selectedAction.value === 'insert_play'){
+          delete payload.params.material_id
+          payload.params.is_emergency = !!payload.params.is_emergency
+          payload.params.is_emergicy = payload.params.is_emergency
+        }
         console.debug('onSend payload', payload)
-        // 若为截屏动作，直接调用 snapshot 获取 URL（更直接且能即时展示）
-        if(selectedAction.value === 'capture' && target_device_id){
-          try{
-            const snapRes = await api.get(`/v1/devices/remote/${target_device_id}/snapshot`, { timeout: 35000 })
-            const url = tryExtractSnapshotUrl(snapRes.data?.snapshot_url || snapRes.data?.url || snapRes.data)
-            if(url) snapshotUrl.value = url
-            // 也记录为已下发
-            alert('截屏指令已下发: ' + (snapRes.data?.cmd_id || payload.cmd_id))
-          }catch(e){
-            if(e?.code === 'ECONNABORTED' || /timeout/i.test(e?.message || '')){
-              alert('截图请求耗时较长，正在后台等待设备回传...')
-              const delayedUrl = await pollSnapshotResultByDevice(target_device_id)
-              if(!delayedUrl){
-                alert('截图回传超时，请检查网关回调地址、设备在线状态与 OSS 上传日志')
-              }
-            }else{
-              console.error('snapshot API failed, fallback to sendCommand', e)
-              const res = await sendCommand(payload)
-              alert('指令已下发: ' + (res.data?.cmd_id || payload.cmd_id))
-              const url = tryExtractSnapshotUrl(res.data?.data?.url || res.data?.url || res.data?.result)
-              if(url) snapshotUrl.value = url
+        // 若为截屏动作，按设备并发触发并汇总结果
+        if(selectedAction.value === 'capture'){
+          snapshotResults.value = devicesArr.map(id => ({ deviceId: id, url: '', status: 'pending', message: '等待设备上传截图' }))
+          activeSnapshotIndex.value = 0
+
+          const allResults = await Promise.all(devicesArr.map(async (deviceId, idx) => {
+            const ret = await captureForDevice(deviceId)
+            upsertSnapshotResult(deviceId, ret)
+            if(ret.status === 'success' && !currentSnapshot.value?.url){
+              activeSnapshotIndex.value = idx
             }
+            return { deviceId, ...ret }
+          }))
+
+          const successCount = allResults.filter(x => x.status === 'success').length
+          const failedDevices = allResults.filter(x => x.status !== 'success').map(x => x.deviceId)
+          if(failedDevices.length){
+            alert(`截图完成：成功 ${successCount}/${devicesArr.length} 台。失败设备：${failedDevices.join(', ')}`)
+          }else{
+            alert(`截图完成：成功 ${successCount}/${devicesArr.length} 台`)
           }
         }else{
           const res = await sendCommand(payload)
@@ -732,14 +795,7 @@ export default {
           return '截屏请求'
         }
         if(action === 'insert_play'){
-          if(p.material_id){
-            const mid = p.material_id
-            const name = materialNames[mid]
-            if(name) return `插播素材：${name}`
-            // 后台异步加载名称以便下次显示更友好
-            ensureMaterialName(mid)
-            return `插播素材：${mid}`
-          }
+          if(p.material_name) return `插播广告：${p.material_name}`
           return shortJson(p)
         }
         // 默认展示常见字段或简短 JSON
@@ -789,7 +845,8 @@ export default {
       // log filters
       logFilterDevice, logFilterAction, clearLogFilters,
       actions, selectedAction, selectAction, previewTemplate, actionTitle, paramTemplate, params, fieldComponent,
-      resetParams, expireSec, onPrepareSend, confirmVisible, finalPayloadPreview, onSend, sending, previewOnly, snapshotUrl,
+      resetParams, expireSec, onPrepareSend, confirmVisible, finalPayloadPreview, onSend, sending, previewOnly,
+      snapshotResults, activeSnapshotIndex, currentSnapshot, canPrevSnapshot, canNextSnapshot, prevSnapshot, nextSnapshot,
       materials, materialQuery, materialLoading, materialsFiltered, selectMaterial, selectedMaterial, onPreviewMaterial, fetchMaterials, onMaterialQueryChange, materialItemStyle,
       commands, previewJSON, fetchCommands
       , commandLogs, logsLoading, fetchCommandLogs, shortJson, detailVisible, detailRow, showDetail,

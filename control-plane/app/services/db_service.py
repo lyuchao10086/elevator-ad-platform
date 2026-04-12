@@ -308,26 +308,90 @@ def list_commands(limit=100, offset=0, q=None, device_id=None, action=None, from
             rows = cur.fetchall()
 
         # Normalize rows for frontend
-        for r in rows:
-            if 'cmd_id' not in r and 'id' in r:
-                r['cmd_id'] = r.get('id')
-            # ensure params/result present
-            r['params'] = r.get('params') or r.get('params_json') or {}
-            r['result'] = r.get('result') or r.get('data') or r.get('response') or {}
-            # convert send_ts from ms to s if needed
-            st = r.get('send_ts')
-            try:
-                if st is None:
-                    r['send_ts'] = None
-                else:
-                    if isinstance(st, (int, float)) and st > 1e12:
-                        r['send_ts'] = int(st // 1000)
-                    else:
-                        r['send_ts'] = int(st)
-            except Exception:
-                r['send_ts'] = r.get('send_ts')
+        rows = [_normalize_command_row(r) for r in rows]
 
         return rows
+    finally:
+        conn.close()
+
+
+def _normalize_command_row(row: dict) -> dict:
+    r = dict(row or {})
+    if 'cmd_id' not in r and 'id' in r:
+        r['cmd_id'] = r.get('id')
+
+    params = r.get('params') or r.get('params_json') or {}
+    result = r.get('result') or r.get('data') or r.get('response') or {}
+
+    if isinstance(params, str):
+        try:
+            params = json.loads(params)
+        except Exception:
+            pass
+    if isinstance(result, str):
+        try:
+            result = json.loads(result)
+        except Exception:
+            pass
+
+    r['params'] = params
+    r['result'] = result
+
+    st = r.get('send_ts')
+    try:
+        if st is None:
+            r['send_ts'] = None
+        elif isinstance(st, (int, float)) and st > 1e12:
+            r['send_ts'] = int(st // 1000)
+        else:
+            r['send_ts'] = int(st)
+    except Exception:
+        r['send_ts'] = r.get('send_ts')
+
+    return r
+
+
+def get_command_by_cmd_id(cmd_id: str):
+    if not cmd_id:
+        return None
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute(
+            "SELECT * FROM command_logs WHERE cmd_id = %s ORDER BY created_at DESC NULLS LAST LIMIT 1",
+            [cmd_id],
+        )
+        row = cur.fetchone()
+        return _normalize_command_row(row) if row else None
+    finally:
+        conn.close()
+
+
+def list_commands_by_batch(batch_id: str, action: str = None, limit: int = 500):
+    if not batch_id:
+        return []
+    conn = get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        sql = """
+        SELECT *
+        FROM command_logs
+        WHERE (
+            cmd_id = %s
+            OR cmd_id LIKE %s
+            OR COALESCE(params::text, '') ILIKE %s
+            OR COALESCE(result::text, '') ILIKE %s
+        )
+        """
+        params = [batch_id, f"{batch_id}:%", f"%{batch_id}%", f"%{batch_id}%"]
+        if action:
+            sql += " AND action = %s"
+            params.append(action)
+        sql += " ORDER BY send_ts DESC NULLS LAST, created_at DESC NULLS LAST LIMIT %s"
+        params.append(limit)
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+        return [_normalize_command_row(r) for r in rows]
     finally:
         conn.close()
 
