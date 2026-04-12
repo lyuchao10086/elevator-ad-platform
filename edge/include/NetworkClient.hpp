@@ -19,6 +19,12 @@ using json = nlohmann::json;
  */
 class NetworkClient {
 public:
+    struct DownloadResult {
+        bool success = false;
+        int httpStatus = 0;
+        std::string reason;
+    };
+
     /**
      * @brief 构造函数
      * @param apiUrl 云端 API 基础地址 (例如 http://127.0.0.1:8080/api)
@@ -72,6 +78,15 @@ public:
      * @return true 下载并保存成功
      */
     bool downloadAdFile(const std::string& adId, const std::string& filename, const std::string& savePath);
+
+    /**
+     * @brief 下载素材并返回细粒度失败原因
+     * @param adId 广告 ID
+     * @param filename 文件名
+     * @param savePath 本地保存路径
+     * @return DownloadResult success/httpStatus/reason
+     */
+    DownloadResult downloadAdFileDetailed(const std::string& adId, const std::string& filename, const std::string& savePath);
 
     /**
      * @brief 向网关汇报同步结果

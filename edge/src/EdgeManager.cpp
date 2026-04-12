@@ -13,6 +13,8 @@
 #include <filesystem>
 #include <random> // 增加 random 头文件
 #include <set>    // 增加 set 头文件
+#include <cctype>
+#include <cstdio>
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -63,6 +65,63 @@ static std::string b64encode(const std::vector<uint8_t>& in) {
         out.push_back('=');
     }
     return out;
+}
+
+static std::string toLowerCopy(std::string s) {
+    for (char& c : s) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return s;
+}
+
+static std::string escapeSingleQuotes(const std::string& in) {
+    std::string out;
+    out.reserve(in.size() + 8);
+    for (char c : in) {
+        if (c == '\'') {
+            out += "'\\''";
+        } else {
+            out.push_back(c);
+        }
+    }
+    return out;
+}
+
+static bool computeFileMd5(const std::string& filePath, std::string& md5, std::string& err) {
+    std::string escaped = escapeSingleQuotes(filePath);
+#ifdef __APPLE__
+    std::string cmd = "md5 -q '" + escaped + "' 2>/dev/null";
+#else
+    std::string cmd = "md5sum '" + escaped + "' 2>/dev/null | awk '{print $1}'";
+#endif
+
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) {
+        err = "md5_command_open_failed";
+        return false;
+    }
+
+    char buffer[256] = {0};
+    std::string output;
+    if (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        output = buffer;
+    }
+    int rc = pclose(pipe);
+    if (rc != 0) {
+        err = "md5_command_failed";
+        return false;
+    }
+
+    while (!output.empty() && (output.back() == '\n' || output.back() == '\r' || output.back() == ' ' || output.back() == '\t')) {
+        output.pop_back();
+    }
+    if (output.empty()) {
+        err = "md5_empty_output";
+        return false;
+    }
+
+    md5 = toLowerCopy(output);
+    return true;
 }
 
 void EdgeManager::handleCloudCommand(const json& msg, std::function<void(const json&)> send) {
@@ -278,18 +337,18 @@ bool EdgeManager::init(const std::string& configPath, bool isPlayerMode) {
         network_ = std::make_unique<NetworkClient>(config_.gateway_ws_url, config_.device_id, config_.token);
     }
 
-    // 4. 加载广告素材数据
-    if (!syncAds()) {
-        printInfo(LogLevel::WARNING, "初始同步广告数据失败，将依赖本地缓存或后续定时更新");
-    } else {
-        printInfo(LogLevel::INFO, "广告数据已入库");
-    }
-
-    // 5. 加载排期策略数据
+    // 4. 先同步排期策略，再按排期同步素材
     if (!syncSchedule()) {
         printInfo(LogLevel::WARNING, "初始同步排期数据失败，将依赖本地缓存或后续定时更新");
     } else {
         printInfo(LogLevel::INFO, "排期数据已入库");
+    }
+
+    // 5. 加载广告素材数据
+    if (!syncAds()) {
+        printInfo(LogLevel::WARNING, "初始同步广告数据失败，将依赖本地缓存或后续定时更新");
+    } else {
+        printInfo(LogLevel::INFO, "广告数据已入库");
     }
 
     // 6. 初始化播放器
@@ -429,18 +488,32 @@ void EdgeManager::run() {
             // 记录开始播放时间
             long long startTime = std::time(nullptr);
 
+            // 播放前素材可用性检查：本地不可用时按需向网关下载
+            std::string checkReason;
+            if (!ensurePlayableAsset(*item, checkReason)) {
+                printInfo(LogLevel::ERROR, "素材不可用，跳过播放: " + item->getAdId() + "，原因: " + checkReason);
+                long long endTime = std::time(nullptr);
+                log(item->getAdId(), item->getFilePath(), startTime, endTime, 0, 503,
+                    "ASSET_NOT_READY: " + checkReason, "PLAYBACK");
+                continue;
+            }
+
+            int statusCode = 200;
+            int durationMs = item->getDuration() * 1000;
+
             // 1. 记录播放开始 (写入 playlist 表)
             recordPlayStart(*item);
             
             // 2. 准备播放
             player_->SetWindowTitle("Playing: " + item->getAdId());
-            int64_t duration_ms = item->getDuration() * 1000;
+            int64_t duration_ms = durationMs;
             
             // 加载媒体文件
             if (player_->Load(item->getFilePath(), duration_ms)) {
                 // 开始播放 (启动解码线程)
                 if (!player_->Play()) {
                     printInfo(LogLevel::ERROR, "播放失败: " + item->getAdId());
+                    statusCode = 500;
                 } else {
                     // 等待播放结束
                     // 这是一个阻塞循环，但必须在其中不断调用 Update 以刷新 UI
@@ -457,10 +530,12 @@ void EdgeManager::run() {
                         if (should_soft_reboot_) {
                              player_->Stop();
                              printInfo(LogLevel::INFO, "检测到重启指令 (播放中)，停止播放并执行重启");
+                                statusCode = 499;
                              break; 
                         }
                         if (should_exit_) {
                              player_->Stop();
+                                statusCode = 499;
                              goto end_loop;
                         }
                         // 实时检查窗口状态
@@ -468,12 +543,14 @@ void EdgeManager::run() {
                         if (!player_->IsWindowOpen()) {
                              player_->Stop();
                              printInfo(LogLevel::INFO, "检测到窗口关闭 (播放中)，准备退出");
+                             statusCode = 499;
                              goto end_loop;
                         }
                     }
                 }
             } else {
                 printInfo(LogLevel::WARNING, "加载失败: " + item->getFilePath());
+                statusCode = 404;
             }
             
             // 再次检查窗口状态 (防止在 Load 失败或 Play 刚结束的瞬间关闭)
@@ -483,7 +560,7 @@ void EdgeManager::run() {
             }
             
             // 3. 记录播放结束 (写入 log 表)
-            recordPlayEnd(*item, startTime, duration_ms);
+            recordPlayEnd(*item, startTime, durationMs, statusCode);
 
         } else {
             // 没有可播放的内容，休眠一会避免空转
@@ -648,6 +725,124 @@ bool EdgeManager::waitForPlaybackOrStop() {
         }
     }
     return true; // 继续
+}
+
+bool EdgeManager::ensurePlayableAsset(const PlayItem& item, std::string& reason) {
+    std::string filePath = item.getFilePath();
+
+    if (filePath.empty()) {
+        reason = "empty_file_path";
+        return false;
+    }
+
+    std::string filename;
+    std::string expectedMd5;
+    try {
+        auto rows = db_->query("SELECT filename, md5 FROM advertisement WHERE ad_id = '" + item.getAdId() + "' LIMIT 1;");
+        if (!rows.empty()) {
+            if (rows[0].count("filename")) {
+                filename = rows[0].at("filename");
+            }
+            if (rows[0].count("md5")) {
+                expectedMd5 = rows[0].at("md5");
+            }
+        }
+    } catch (const std::exception& e) {
+        reason = "query_advertisement_failed: " + std::string(e.what());
+        return false;
+    }
+
+    if (filename.empty()) {
+        filename = std::filesystem::path(filePath).filename().string();
+    }
+
+    if (filename.empty()) {
+        reason = "missing_filename";
+        return false;
+    }
+
+    std::string savePath = config_.resources_dir + "ads/" + filename;
+
+    int retryCount = 3;
+    try {
+        auto cfg = db_->query("SELECT download_retry_count FROM schedule LIMIT 1;");
+        if (!cfg.empty() && cfg[0].count("download_retry_count")) {
+            int dbRetry = std::stoi(cfg[0].at("download_retry_count"));
+            if (dbRetry > 0) {
+                retryCount = dbRetry;
+            }
+        }
+    } catch (...) {}
+
+    auto verifyMd5IfNeeded = [&](std::string& verifyReason) -> bool {
+        if (expectedMd5.empty()) {
+            return true;
+        }
+        std::string actual;
+        std::string err;
+        if (!computeFileMd5(savePath, actual, err)) {
+            verifyReason = "md5_calc_failed:" + err;
+            return false;
+        }
+        if (toLowerCopy(expectedMd5) != toLowerCopy(actual)) {
+            verifyReason = "md5_mismatch";
+            return false;
+        }
+        return true;
+    };
+
+    for (int attempt = 1; attempt <= retryCount; ++attempt) {
+        if (std::filesystem::exists(savePath)) {
+            std::string verifyReason;
+            if (verifyMd5IfNeeded(verifyReason)) {
+                printInfo(LogLevel::INFO, "素材可用性检查通过: " + savePath);
+                return true;
+            }
+
+            if (verifyReason == "md5_mismatch") {
+                try { std::filesystem::remove(savePath); } catch (...) {}
+                reason = verifyReason;
+            } else {
+                reason = verifyReason;
+                return false;
+            }
+        }
+
+        // 兜底广告不走下载，必须本地存在
+        if (item.getAdId() == "DEFAULT") {
+            reason = "default_asset_missing";
+            return false;
+        }
+
+        if (!network_) {
+            reason = "network_failure:network_client_not_initialized";
+            return false;
+        }
+
+        printInfo(LogLevel::INFO, "素材缺失或损坏，尝试下载: ad_id=" + item.getAdId() + ", filename=" + filename + ", attempt=" + std::to_string(attempt) + "/" + std::to_string(retryCount));
+        auto result = network_->downloadAdFileDetailed(item.getAdId(), filename, savePath);
+        if (result.success) {
+            continue;
+        }
+
+        if (result.httpStatus == 404) {
+            reason = "http_404";
+        } else if (result.httpStatus > 0) {
+            reason = "http_error:" + std::to_string(result.httpStatus);
+        } else {
+            reason = "network_failure";
+        }
+
+        if (attempt < retryCount) {
+            int backoffSec = 1 << (attempt - 1);
+            std::this_thread::sleep_for(std::chrono::seconds(backoffSec));
+        }
+    }
+
+    if (reason.empty()) {
+        reason = "download_retry_exhausted";
+    }
+    return false;
 }
 
 std::unique_ptr<PlayItem> EdgeManager::getNextAsset() {
@@ -1398,10 +1593,10 @@ bool EdgeManager::syncSchedule() {
 void EdgeManager::syncLoop() {
     printInfo(LogLevel::INFO, "定时同步线程已启动 (周期: 1分钟)");
     while (syncRunning_) {
-        // 1. 同步广告
-        syncAds();
-        // 2. 同步排期
+        // 1. 先同步排期，再按最新排期同步素材
         syncSchedule();
+        // 2. 同步广告与按需素材下载
+        syncAds();
 
         // 休眠 60s，分段休眠以响应退出
         for (int i = 0; i < 600 && syncRunning_; ++i) {
