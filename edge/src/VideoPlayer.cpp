@@ -70,18 +70,14 @@ struct VideoPlayer::Impl {
     }
 
     void CleanupDecoder() {
-        std::cout << "[VideoPlayer] CleanupDecoder: 开始清理" << std::endl;
         should_stop = true;
 
         // 唤醒等待的线程
         queue_cv.notify_all();
-        std::cout << "[VideoPlayer] CleanupDecoder: 已发送 notify_all" << std::endl;
 
         // 等待线程结束
         if (decode_thread && decode_thread->joinable()) {
-            std::cout << "[VideoPlayer] CleanupDecoder: 等待解码线程 join..." << std::endl;
             decode_thread->join();
-            std::cout << "[VideoPlayer] CleanupDecoder: 解码线程 join 完成" << std::endl;
         }
         
         if (decode_thread) {
@@ -89,7 +85,6 @@ struct VideoPlayer::Impl {
         }
 
         // 清理FFmpeg
-        std::cout << "[VideoPlayer] CleanupDecoder: 清理 FFmpeg 资源" << std::endl;
         if (sws_ctx) {
             sws_freeContext(sws_ctx);
             sws_ctx = nullptr;
@@ -104,7 +99,6 @@ struct VideoPlayer::Impl {
         // 清空队列
         {
             std::lock_guard<std::mutex> lock(queue_mutex);
-            std::cout << "[VideoPlayer] CleanupDecoder: 清空队列, 当前大小: " << frame_queue.size() << std::endl;
             while (!frame_queue.empty()) {
                 frame_queue.pop();
             }
@@ -114,7 +108,6 @@ struct VideoPlayer::Impl {
         is_playing = false;
         is_paused = false;
         is_image = false;
-        std::cout << "[VideoPlayer] CleanupDecoder: 清理完成" << std::endl;
     }
 
     void CleanupSDL() {
@@ -227,8 +220,7 @@ struct VideoPlayer::Impl {
         AVPacket* packet = av_packet_alloc();
         AVFrame* frame = av_frame_alloc();
 
-        std::cout << "解码线程启动" << std::endl;
-        
+
         // 关键：确保宽度和高度是偶数（YUV420P要求）
         // 如果是奇数，可能会导致渲染时出现花屏或倾斜
         int target_width = (video_codec_ctx->width + 1) & ~1;  // 对齐到偶数
@@ -316,7 +308,6 @@ struct VideoPlayer::Impl {
             int ret = av_read_frame(format_ctx, packet);
             if (ret < 0) {
                 if (ret == AVERROR_EOF) {
-                    std::cout << "视频播放结束" << std::endl;
                     should_stop = true; 
                 }
                 break;
@@ -398,7 +389,6 @@ struct VideoPlayer::Impl {
         av_frame_free(&yuv_frame);
         av_frame_free(&frame);
         av_packet_free(&packet);
-        std::cout << "解码线程退出" << std::endl;
     }
 
     void SetWindowTitle(const std::string& title);
@@ -527,8 +517,6 @@ bool VideoPlayer::Load(const std::string& filepath, int64_t duration_ms) {
     pImpl->target_duration_ms = 0;
     pImpl->playback_start_time = std::chrono::steady_clock::now();
 
-    std::cout << "加载媒体: " << filepath << std::endl;
-
     if (avformat_open_input(&pImpl->format_ctx, filepath.c_str(), nullptr, nullptr) < 0) {
         std::cerr << "无法打开文件: " << filepath << std::endl;
         return false;
@@ -568,9 +556,6 @@ bool VideoPlayer::Load(const std::string& filepath, int64_t duration_ms) {
         return false;
     }
 
-    std::cout << "解码器像素格式: " << av_get_pix_fmt_name(pImpl->video_codec_ctx->pix_fmt) 
-              << " (" << pImpl->video_codec_ctx->pix_fmt << ")" << std::endl;
-
     pImpl->width = pImpl->video_codec_ctx->width;
     pImpl->height = pImpl->video_codec_ctx->height;
     pImpl->time_base = pImpl->video_stream->time_base;
@@ -601,10 +586,6 @@ bool VideoPlayer::Load(const std::string& filepath, int64_t duration_ms) {
     if (pImpl->is_image) {
         pImpl->target_duration_ms = duration_ms > 0 ? duration_ms : 3000;
     }
-
-    std::cout << "媒体加载成功: " << pImpl->width << "x" << pImpl->height 
-              << ", " << pImpl->frame_rate << " fps, " 
-              << (pImpl->duration_ms / 1000.0) << "s" << std::endl;
 
     return true;
 }

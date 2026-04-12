@@ -13,6 +13,9 @@
 #include <filesystem>
 #include <random> // 增加 random 头文件
 #include <set>    // 增加 set 头文件
+#include <unordered_set>
+#include <unordered_map>
+#include <limits>
 #include <cctype>
 #include <cstdio>
 #ifdef _WIN32
@@ -34,6 +37,8 @@ typedef int socklen_t;
 #include <arpa/inet.h>
 #include <unistd.h>
 #endif
+
+constexpr bool kEnableMd5Verification = false;
 
 /**
  * @brief Base64 编码辅助函数
@@ -124,17 +129,38 @@ static bool computeFileMd5(const std::string& filePath, std::string& md5, std::s
     return true;
 }
 
+static std::string normalizeRawSlotToEdgeRange(const std::string& rawSlot) {
+    if (rawSlot == "*") {
+        return "00:00:00-23:59:59";
+    }
+
+    auto dash = rawSlot.find('-');
+    if (dash == std::string::npos) {
+        return "";
+    }
+
+    std::string start = rawSlot.substr(0, dash);
+    std::string end = rawSlot.substr(dash + 1);
+    if (start.size() == 5 && end.size() == 5) {
+        return start + ":00-" + end + ":00";
+    }
+    if (start.size() == 8 && end.size() == 8) {
+        return start + "-" + end;
+    }
+    return "";
+}
+
 void EdgeManager::handleCloudCommand(const json& msg, std::function<void(const json&)> send) {
     bool is_snapshot = (msg.contains("type") && msg["type"] == "snapshot_request") ||
         (msg.contains("type") && msg["type"] == "command" && msg.contains("payload") && msg["payload"] == "SNAPSHOT");
     bool is_command = (msg.contains("type") && msg["type"] == "command") && !is_snapshot;
-    
+
     if (is_snapshot) {
         std::string req_id = msg.value("cmd_id", "");
         if (req_id.empty()) req_id = msg.value("req_id", "");
-        
+
         printInfo(LogLevel::INFO, "[云端指令] 收到截图指令，请求ID: " + req_id);
-        
+
         std::string b64;
         bool ok = false;
         {
@@ -167,53 +193,461 @@ void EdgeManager::handleCloudCommand(const json& msg, std::function<void(const j
         snapshot_msg["device_id"] = config_.device_id;
         snapshot_msg["req_id"] = req_id;
         snapshot_msg["ts"] = static_cast<long long>(std::time(nullptr));
-        snapshot_msg["payload"] = { {"format","bmp"},{"data", b64} };
+        snapshot_msg["payload"] = {{"format", "bmp"}, {"data", b64}};
         send(snapshot_msg);
-    } else if (is_command) {
-        std::string cmd = msg.value("payload", "");
-        std::string cmd_id = msg.value("cmd_id", "");
-        json data = msg.value("data", json::object());
-        
-        printInfo(LogLevel::INFO, "[云端指令] 收到通用指令: " + cmd + ", 参数: " + data.dump());
-        
-        std::string result = "ok";
-        if (cmd == "SET_VOLUME") {
-            int old_vol = current_volume_;
-            bool old_mute = current_mute_;
-            int vol = data.value("volume", current_volume_);
-            bool mute = data.value("mute", current_mute_);
-            current_volume_ = vol;
-            current_mute_ = mute;
-            result = std::string("set_volume:") + std::to_string(vol) + "|mute:" + (mute ? "1" : "0");
-            
-            printInfo(LogLevel::INFO, "[云端指令] 执行完成 SET_VOLUME - 执行前: (音量=" + std::to_string(old_vol) + ", 静音=" + (old_mute ? "是" : "否") + 
-                      ") -> 执行后: (音量=" + std::to_string(vol) + ", 静音=" + (mute ? "是" : "否") + ")");
-            
-            // 记录命令执行日志
-            log("SYSTEM", "COMMAND_VOLUME", static_cast<long long>(std::time(nullptr)), static_cast<long long>(std::time(nullptr)), 0, 200, "SET_VOLUME SUCCESS", "COMMAND");
-        } else if (cmd == "REBOOT") {
-            result = "reboot_ok";
-            should_soft_reboot_ = true;
-            printInfo(LogLevel::INFO, "[云端指令] 执行 REBOOT，设备即将软重启");
-            
-            // 记录命令执行日志
-            log("SYSTEM", "COMMAND_REBOOT", static_cast<long long>(std::time(nullptr)), static_cast<long long>(std::time(nullptr)), 0, 200, "REBOOT TRIGGERED", "COMMAND");
-        } else {
-            result = cmd + "_ok";
-            printInfo(LogLevel::INFO, "[云端指令] 未知指令或无需处理的指令: " + cmd);
-            
-            // 记录命令执行日志
-            log("SYSTEM", "COMMAND_UNKNOWN", static_cast<long long>(std::time(nullptr)), static_cast<long long>(std::time(nullptr)), 0, 404, "UNKNOWN COMMAND: " + cmd, "COMMAND");
-        }
-        json resp;
-        resp["type"] = "command_response";
-        resp["device_id"] = config_.device_id;
-        resp["req_id"] = msg.value("req_id", "");
-        resp["ts"] = static_cast<long long>(std::time(nullptr));
-        resp["payload"] = { {"cmd_id", cmd_id}, {"status","success"}, {"result", result} };
-        send(resp);
-        printInfo(LogLevel::INFO, "[云端指令] 回执已发送，指令ID: " + cmd_id);
+
+        // 统一指令回执：截图指令也返回 command_response，便于云端统一处理
+        json cmd_resp;
+        cmd_resp["type"] = "command_response";
+        cmd_resp["device_id"] = config_.device_id;
+        cmd_resp["req_id"] = msg.value("req_id", "");
+        cmd_resp["ts"] = static_cast<long long>(std::time(nullptr));
+        cmd_resp["payload"] = {
+            {"cmd_id", msg.value("cmd_id", "")},
+            {"status", ok ? "success" : "failed"},
+            {"result", ok ? "snapshot_ok" : "snapshot_failed"}
+        };
+        send(cmd_resp);
+        printInfo(LogLevel::INFO, "[云端指令] 回执已发送到 " + config_.gateway_ws_url + ", 内容: " + cmd_resp.dump());
+        return;
     }
+
+    if (!is_command) {
+        return;
+    }
+
+    std::string cmd = msg.value("payload", "");
+    std::string cmd_id = msg.value("cmd_id", "");
+    json data = msg.value("data", json::object());
+    printInfo(LogLevel::INFO, "[云端指令] 收到通用指令: " + cmd + ", 参数: " + data.dump());
+
+    std::string result = "ok";
+
+    if (cmd == "SET_VOLUME") {
+        int old_vol = current_volume_;
+        bool old_mute = current_mute_;
+        int vol = data.value("volume", current_volume_);
+        bool mute = data.value("mute", current_mute_);
+        current_volume_ = vol;
+        current_mute_ = mute;
+        result = std::string("set_volume:") + std::to_string(vol) + "|mute:" + (mute ? "1" : "0");
+
+        printInfo(LogLevel::INFO, "[云端指令] 执行完成 SET_VOLUME - 执行前: (音量=" + std::to_string(old_vol) + ", 静音=" + (old_mute ? "是" : "否") +
+                                  ") -> 执行后: (音量=" + std::to_string(vol) + ", 静音=" + (mute ? "是" : "否") + ")");
+        log("SYSTEM", "COMMAND_VOLUME", static_cast<long long>(std::time(nullptr)), static_cast<long long>(std::time(nullptr)), 0, 200, "SET_VOLUME SUCCESS", "COMMAND");
+    } else if (cmd == "REBOOT") {
+        result = "reboot_ok";
+        should_soft_reboot_ = true;
+        printInfo(LogLevel::INFO, "[云端指令] 执行 REBOOT，设备即将软重启");
+        log("SYSTEM", "COMMAND_REBOOT", static_cast<long long>(std::time(nullptr)), static_cast<long long>(std::time(nullptr)), 0, 200, "REBOOT TRIGGERED", "COMMAND");
+    } else if (cmd == "INSERT_PLAY") {
+        auto sqlEscape = [](std::string v) {
+            size_t pos = 0;
+            while ((pos = v.find('\'', pos)) != std::string::npos) {
+                v.replace(pos, 1, "''");
+                pos += 2;
+            }
+            return v;
+        };
+        auto normalizeMaterialKey = [](std::string v) {
+            std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+            // ad_name 常不带扩展名，这里兼容 filename 的 stem 比较
+            auto slash = v.find_last_of("/\\");
+            if (slash != std::string::npos && slash + 1 < v.size()) v = v.substr(slash + 1);
+            auto dot = v.find_last_of('.');
+            if (dot != std::string::npos && dot > 0) v = v.substr(0, dot);
+            return v;
+        };
+        auto filenameFromUrl = [](const std::string& url) {
+            if (url.empty()) return std::string();
+            auto q = url.find('?');
+            std::string trimmed = (q == std::string::npos) ? url : url.substr(0, q);
+            auto slash = trimmed.find_last_of('/');
+            if (slash == std::string::npos || slash + 1 >= trimmed.size()) return std::string();
+            return trimmed.substr(slash + 1);
+        };
+        auto safeRollback = [this]() {
+            try { if (db_) db_->rollback(); } catch (...) {}
+        };
+
+        std::string adId;
+        std::string adName;
+        if (data.is_object()) {
+            adId = data.value("material_id", "");
+            if (adId.empty()) adId = data.value("ad_id", "");
+            if (adId.empty()) adId = data.value("materialId", "");
+            if (adId.empty()) adId = data.value("id", "");
+            adName = data.value("ad_name", "");
+            if (adId.empty() && data.contains("payload") && data["payload"].is_object()) {
+                const auto& p = data["payload"];
+                adId = p.value("material_id", "");
+                if (adId.empty()) adId = p.value("ad_id", "");
+                if (adId.empty()) adId = p.value("materialId", "");
+                if (adId.empty()) adId = p.value("id", "");
+                if (adName.empty()) adName = p.value("ad_name", "");
+            }
+        }
+        if (adId.empty() && msg.is_object()) {
+            adId = msg.value("material_id", "");
+            if (adId.empty()) adId = msg.value("ad_id", "");
+            if (adId.empty()) adId = msg.value("materialId", "");
+            if (adId.empty()) adId = msg.value("id", "");
+        }
+        if (adName.empty() && msg.is_object()) {
+            adName = msg.value("ad_name", "");
+        }
+
+        std::string ossUrl;
+        if (data.is_object()) {
+            ossUrl = data.value("oss_url", "");
+            if (ossUrl.empty()) ossUrl = data.value("url", "");
+            if (ossUrl.empty() && data.contains("payload") && data["payload"].is_object()) {
+                const auto& p = data["payload"];
+                ossUrl = p.value("oss_url", "");
+                if (ossUrl.empty()) ossUrl = p.value("url", "");
+            }
+        }
+        if (ossUrl.empty() && msg.is_object()) {
+            ossUrl = msg.value("oss_url", "");
+            if (ossUrl.empty()) ossUrl = msg.value("url", "");
+        }
+
+        bool isEmergency = data.value("is_emergency", false);
+        std::string playMode = data.value("play_mode", "single");
+        int reqPriority = data.value("priority", 1);
+        if (reqPriority <= 0) reqPriority = 1;
+
+        std::string filenameHint = adName;
+
+        bool hasIdentity = !filenameHint.empty();
+        if (!hasIdentity || !db_) {
+            result = "insert_play_failed";
+            std::string reason = !hasIdentity ? "missing_ad_name" : "db_not_ready";
+            printInfo(LogLevel::ERROR,
+                "[云端指令] INSERT_PLAY 参数无效或数据库不可用, reason=" + reason +
+                ", data=" + data.dump() +
+                ", msg=" + msg.dump());
+            log("SYSTEM", "COMMAND_INSERT_PLAY", static_cast<long long>(std::time(nullptr)), static_cast<long long>(std::time(nullptr)), 0, 400, "INSERT_PLAY INVALID PARAM", "COMMAND");
+        } else {
+            try {
+                db_->beginTransaction();
+
+                bool canUpdatePlaylist = true;
+                std::string insertFailReason;
+
+                std::string lookupSQL;
+                if (!filenameHint.empty()) {
+                    lookupSQL = "SELECT ad_id, filename FROM advertisement WHERE filename = '" + sqlEscape(filenameHint) + "' LIMIT 1;";
+                } else {
+                    lookupSQL = "SELECT ad_id, filename FROM advertisement WHERE ad_id = '" + sqlEscape(adId) + "' LIMIT 1;";
+                }
+                auto adRows = db_->query(lookupSQL);
+                if (adRows.empty() && network_) {
+                    json adsJson = network_->fetchAds();
+                    if (!adsJson.is_null() && adsJson.contains("ads") && adsJson["ads"].is_array()) {
+                        const std::string normalizedAdName = normalizeMaterialKey(adName);
+                        for (const auto& ad : adsJson["ads"]) {
+                            if (!ad.is_object()) continue;
+                            std::string itemAdId = ad.value("ad_id", "");
+                            if (itemAdId.empty()) continue;
+                            std::string itemFilename = ad.value("filename", "");
+                            std::string itemAdName = ad.value("ad_name", "");
+                            if (itemAdName.empty()) itemAdName = ad.value("name", "");
+                            bool match = false;
+                            if (!filenameHint.empty() && itemFilename == filenameHint) match = true;
+                            if (!adName.empty() && itemFilename == adName) match = true;
+                            if (!adName.empty() && itemAdName == adName) match = true;
+                            if (!adName.empty() && itemAdId == adName) match = true;
+                            if (!normalizedAdName.empty() && normalizeMaterialKey(itemFilename) == normalizedAdName) match = true;
+                            if (!normalizedAdName.empty() && normalizeMaterialKey(itemAdName) == normalizedAdName) match = true;
+                            if (!match && filenameHint.empty() && !adId.empty() && itemAdId == adId) {
+                                match = true;
+                            }
+                            if (!match) {
+                                continue;
+                            }
+                            std::string filename = ad.value("filename", "");
+                            std::string type = ad.value("type", "video");
+                            std::string md5 = ad.value("md5", "");
+                            int duration = ad.value("duration", 0);
+                            long long bytes = ad.value("bytes", 0LL);
+                            std::string upsertSQL = "REPLACE INTO advertisement (ad_id, type, filename, md5, duration, bytes, last_played_time) VALUES ('"
+                                + sqlEscape(itemAdId) + "', '" + sqlEscape(type) + "', '" + sqlEscape(filename) + "', '"
+                                + sqlEscape(md5) + "', " + std::to_string(duration) + ", " + std::to_string(bytes) + ", 0);";
+                            db_->execute(upsertSQL);
+                        }
+                    }
+                    adRows = db_->query(lookupSQL);
+
+                    // /api/ads 未命中时，继续从 /api/schedule 的 playlist_raw 补齐元数据
+                    if (adRows.empty()) {
+                        json schJson = network_->fetchSchedule();
+                        if (!schJson.is_null()) {
+                                const std::string normalizedAdName = normalizeMaterialKey(adName);
+                            json rawList = json::array();
+                            if (schJson.contains("playlist_raw") && schJson["playlist_raw"].is_array()) {
+                                rawList = schJson["playlist_raw"];
+                            } else if (schJson.contains("playlist") && schJson["playlist"].is_array()) {
+                                rawList = schJson["playlist"];
+                            }
+
+                            for (const auto& it : rawList) {
+                                if (!it.is_object()) continue;
+                                std::string itemId = it.value("id", "");
+                                if (itemId.empty()) itemId = it.value("ad_id", "");
+                                std::string fn0 = it.value("file", "");
+                                if (fn0.empty()) fn0 = it.value("filename", "");
+                                if (fn0.empty()) fn0 = it.value("file_name", "");
+
+                                bool match = false;
+                                if (!filenameHint.empty() && fn0 == filenameHint) match = true;
+                                if (!adName.empty() && fn0 == adName) match = true;
+                                if (!adName.empty() && itemId == adName) match = true;
+                                if (!normalizedAdName.empty() && normalizeMaterialKey(fn0) == normalizedAdName) match = true;
+                                if (!match && filenameHint.empty() && !adId.empty() && itemId == adId) match = true;
+                                if (!match) continue;
+
+                                std::string fn = it.value("file", "");
+                                if (fn.empty()) fn = it.value("filename", "");
+                                if (fn.empty()) fn = it.value("file_name", "");
+                                std::string md5 = it.value("md5", "");
+                                int duration = it.value("duration", 0);
+                                long long bytes = it.value("size_bytes", 0LL);
+                                std::string targetAdId = adId.empty() ? itemId : adId;
+                                std::string upsertSQL = "REPLACE INTO advertisement (ad_id, type, filename, md5, duration, bytes, last_played_time) VALUES ('"
+                                    + sqlEscape(targetAdId) + "', 'video', '"
+                                    + sqlEscape(fn) + "', '"
+                                    + sqlEscape(md5) + "', "
+                                    + std::to_string(duration) + ", "
+                                    + std::to_string(bytes) + ", 0);";
+                                db_->execute(upsertSQL);
+                                break;
+                            }
+                        }
+                        adRows = db_->query(lookupSQL);
+                    }
+
+                    // 若元数据仍缺失，但指令带了 oss_url，则从 URL 提取文件名补一条最小元数据
+                    if (adRows.empty() && !ossUrl.empty()) {
+                        std::string urlFilename = filenameFromUrl(ossUrl);
+                        if (!urlFilename.empty()) {
+                            std::string fallbackAdId = adId.empty() ? adName : adId;
+                            if (fallbackAdId.empty()) fallbackAdId = urlFilename;
+                            std::string upsertSQL = "REPLACE INTO advertisement (ad_id, type, filename, md5, duration, bytes, last_played_time) VALUES ('"
+                                + sqlEscape(fallbackAdId) + "', 'video', '"
+                                + sqlEscape(urlFilename) + "', '', 0, 0, 0);";
+                            db_->execute(upsertSQL);
+                            adRows = db_->query("SELECT ad_id, filename FROM advertisement WHERE ad_id = '" + sqlEscape(fallbackAdId) + "' LIMIT 1;");
+                        }
+                    }
+
+                }
+
+                if (adId.empty() && !adRows.empty() && adRows[0].count("ad_id")) {
+                    adId = adRows[0].at("ad_id");
+                }
+
+                if (adRows.empty()) {
+                    canUpdatePlaylist = false;
+                    insertFailReason = "metadata_not_found";
+                    result = "insert_play_failed_ad_not_found";
+                    safeRollback();
+                    printInfo(LogLevel::ERROR, "[云端指令] INSERT_PLAY 素材不存在: " + adId);
+                    log("SYSTEM", "COMMAND_INSERT_PLAY", static_cast<long long>(std::time(nullptr)), static_cast<long long>(std::time(nullptr)), 0, 404, "INSERT_PLAY AD NOT FOUND: " + adId, "COMMAND");
+                }
+
+                std::string filename;
+                std::string filePath;
+                if (canUpdatePlaylist) {
+                    filename = adRows[0].count("filename") ? adRows[0].at("filename") : "";
+                    if (filename.empty()) {
+                        canUpdatePlaylist = false;
+                        insertFailReason = "missing_filename";
+                        result = "insert_play_failed_missing_filename";
+                        safeRollback();
+                        printInfo(LogLevel::ERROR, "[云端指令] INSERT_PLAY 缺少文件名，无法下载: " + adId);
+                        log("SYSTEM", "COMMAND_INSERT_PLAY", static_cast<long long>(std::time(nullptr)), static_cast<long long>(std::time(nullptr)), 0, 400, "INSERT_PLAY MISSING FILENAME: " + adId, "COMMAND");
+                    } else {
+                        filePath = config_.resources_dir + "ads/" + filename;
+                    }
+                }
+
+                if (canUpdatePlaylist && !std::filesystem::exists(filePath)) {
+                    if (!network_) {
+                        canUpdatePlaylist = false;
+                        insertFailReason = "network_unavailable";
+                        result = "insert_play_failed_network_unavailable";
+                        safeRollback();
+                        printInfo(LogLevel::ERROR, "[云端指令] INSERT_PLAY 本地缺素材且网络不可用: " + adId);
+                        log("SYSTEM", "COMMAND_INSERT_PLAY", static_cast<long long>(std::time(nullptr)), static_cast<long long>(std::time(nullptr)), 0, 503, "INSERT_PLAY NETWORK UNAVAILABLE: " + adId, "COMMAND");
+                    } else {
+                        int retryCount = 3;
+                        try {
+                            auto cfgRows = db_->query("SELECT download_retry_count FROM schedule LIMIT 1;");
+                            if (!cfgRows.empty() && cfgRows[0].count("download_retry_count")) {
+                                int c = std::stoi(cfgRows[0].at("download_retry_count"));
+                                if (c > 0) retryCount = c;
+                            }
+                        } catch (...) {}
+
+                        bool downloaded = false;
+                        std::string lastErr = "download_failed";
+                        for (int attempt = 1; attempt <= retryCount; ++attempt) {
+                            NetworkClient::DownloadResult d;
+                            if (!ossUrl.empty()) {
+                                d = network_->downloadFileFromUrlDetailed(ossUrl, filePath);
+                            } else {
+                                d = network_->downloadAdFileDetailed(adId, filename, filePath);
+                            }
+                            if (d.success && std::filesystem::exists(filePath)) {
+                                downloaded = true;
+                                break;
+                            }
+                            if (!d.reason.empty()) {
+                                lastErr = d.reason;
+                            } else if (d.httpStatus > 0) {
+                                lastErr = "http_error:" + std::to_string(d.httpStatus);
+                            }
+                            if (attempt < retryCount) {
+                                int backoffSec = 1 << (attempt - 1);
+                                std::this_thread::sleep_for(std::chrono::seconds(backoffSec));
+                            }
+                        }
+
+                        if (!downloaded) {
+                            canUpdatePlaylist = false;
+                            insertFailReason = lastErr;
+                            result = "insert_play_failed_download";
+                            safeRollback();
+                            printInfo(LogLevel::ERROR, "[云端指令] INSERT_PLAY 素材下载失败: " + adId + " file=" + filename + " reason=" + insertFailReason);
+                            log("SYSTEM", "COMMAND_INSERT_PLAY", static_cast<long long>(std::time(nullptr)), static_cast<long long>(std::time(nullptr)), 0, 503, "INSERT_PLAY DOWNLOAD FAILED: " + adId + "|" + insertFailReason, "COMMAND");
+                        }
+                    }
+                }
+
+                if (canUpdatePlaylist && !std::filesystem::exists(filePath)) {
+                    canUpdatePlaylist = false;
+                    insertFailReason = "file_missing_after_download";
+                    result = "insert_play_failed_file_missing";
+                    safeRollback();
+                    printInfo(LogLevel::ERROR, "[云端指令] INSERT_PLAY 文件落盘缺失: " + filePath);
+                    log("SYSTEM", "COMMAND_INSERT_PLAY", static_cast<long long>(std::time(nullptr)), static_cast<long long>(std::time(nullptr)), 0, 503,
+                        "INSERT_PLAY FILE MISSING AFTER DOWNLOAD: " + adId, "COMMAND");
+                }
+
+                if (canUpdatePlaylist) {
+                    std::string policyId = "default";
+                    std::string activePlaylistBefore = "[]";
+                    std::string activePlaylistAfter = "[]";
+                    try {
+                        auto slotRows = db_->query("SELECT policy_id, time_range, playlist FROM schedule_timeslot ORDER BY priority DESC, slot_id ASC;");
+                        std::map<std::string, std::string> activeSlot;
+                        for (const auto& row : slotRows) {
+                            auto itRange = row.find("time_range");
+                            if (itRange == row.end()) continue;
+                            if (isTimeInSlot(itRange->second)) {
+                                activeSlot = row;
+                                break;
+                            }
+                        }
+                        if (activeSlot.empty() && !slotRows.empty()) {
+                            activeSlot = slotRows.front();
+                        }
+                        if (!activeSlot.empty()) {
+                            if (activeSlot.count("policy_id")) policyId = activeSlot.at("policy_id");
+                            if (activeSlot.count("playlist")) {
+                                activePlaylistBefore = activeSlot.at("playlist");
+                                activePlaylistAfter = activeSlot.at("playlist");
+                            }
+                        }
+                    } catch (...) {}
+
+                    auto queueRowsBefore = db_->query("SELECT ad_id, priority FROM schedule_interrupt WHERE status = 0 ORDER BY priority DESC, id ASC;");
+                    json queueBefore = json::array();
+                    for (const auto& r : queueRowsBefore) {
+                        json o;
+                        o["ad_id"] = r.count("ad_id") ? r.at("ad_id") : "";
+                        int p = 0;
+                        if (r.count("priority")) {
+                            try { p = std::stoi(r.at("priority")); } catch (...) { p = 0; }
+                        }
+                        o["priority"] = p;
+                        queueBefore.push_back(o);
+                    }
+                    int finalPriority = reqPriority;
+                    if (isEmergency) {
+                        auto maxRows = db_->query("SELECT COALESCE(MAX(priority), 0) AS p FROM schedule_interrupt WHERE status = 0;");
+                        int currentMax = 0;
+                        if (!maxRows.empty() && maxRows[0].count("p")) {
+                            try { currentMax = std::stoi(maxRows[0].at("p")); } catch (...) { currentMax = 0; }
+                        }
+                        if (finalPriority <= currentMax) finalPriority = currentMax + 1;
+                    }
+
+                    db_->execute("INSERT INTO schedule_interrupt (policy_id, trigger_type, ad_id, priority, play_mode, status) VALUES ('"
+                        + sqlEscape(policyId) + "', 'command', '" + sqlEscape(adId) + "', " + std::to_string(finalPriority) + ", '"
+                        + sqlEscape(playMode) + "', 0);");
+
+                    auto queueRowsAfter = db_->query("SELECT ad_id, priority FROM schedule_interrupt WHERE status = 0 ORDER BY priority DESC, id ASC;");
+                    json queueAfter = json::array();
+                    for (const auto& r : queueRowsAfter) {
+                        json o;
+                        o["ad_id"] = r.count("ad_id") ? r.at("ad_id") : "";
+                        int p = 0;
+                        if (r.count("priority")) {
+                            try { p = std::stoi(r.at("priority")); } catch (...) { p = 0; }
+                        }
+                        o["priority"] = p;
+                        queueAfter.push_back(o);
+                    }
+                    long long nowTs = static_cast<long long>(std::time(nullptr));
+                    log(adId, "INTERRUPT_INSERT", nowTs, nowTs, 0, 200,
+                        std::string("INTERRUPT_QUEUED priority=") + std::to_string(finalPriority) + " mode=" + playMode,
+                        "COMMAND");
+
+                    db_->commit();
+                    result = std::string("insert_play_ok:") + adId;
+                    printInfo(LogLevel::INFO, "[云端指令] INSERT_PLAY 执行完成 ad_id=" + adId + ", is_emergency=" + (isEmergency ? "true" : "false"));
+                    log("SYSTEM", "COMMAND_INSERT_PLAY", static_cast<long long>(std::time(nullptr)), static_cast<long long>(std::time(nullptr)), 0, 200,
+                        std::string("INSERT_PLAY SUCCESS: ") + adId + (isEmergency ? "|emergency" : "|normal"), "COMMAND");
+                }
+
+                if (!canUpdatePlaylist) {
+                    printInfo(LogLevel::ERROR,
+                        "[云端指令] INSERT_PLAY 失败摘要: ad_id=" + adId +
+                        ", reason=" + (insertFailReason.empty() ? std::string("unknown") : insertFailReason) +
+                        ", result=" + result);
+                }
+            } catch (const std::exception& e) {
+                safeRollback();
+                result = "insert_play_failed_exception";
+                printInfo(LogLevel::ERROR, "[云端指令] INSERT_PLAY 执行异常: " + std::string(e.what()));
+                log("SYSTEM", "COMMAND_INSERT_PLAY", static_cast<long long>(std::time(nullptr)), static_cast<long long>(std::time(nullptr)), 0, 500,
+                    std::string("INSERT_PLAY EXCEPTION: ") + e.what(), "COMMAND");
+            }
+        }
+    } else {
+        result = cmd + "_failed_unknown_command";
+        printInfo(LogLevel::INFO, "[云端指令] 未知指令或无需处理的指令: " + cmd);
+        log("SYSTEM", "COMMAND_UNKNOWN", static_cast<long long>(std::time(nullptr)), static_cast<long long>(std::time(nullptr)), 0, 404,
+            "UNKNOWN COMMAND: " + cmd, "COMMAND");
+    }
+
+    std::string status = "success";
+    std::string resultLower = result;
+    std::transform(resultLower.begin(), resultLower.end(), resultLower.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+    if (resultLower.find("failed") != std::string::npos || resultLower.find("error") != std::string::npos) {
+        status = "failed";
+    }
+
+    json resp;
+    resp["type"] = "command_response";
+    resp["device_id"] = config_.device_id;
+    resp["req_id"] = msg.value("req_id", "");
+    resp["ts"] = static_cast<long long>(std::time(nullptr));
+    resp["payload"] = {{"cmd_id", cmd_id}, {"status", status}, {"result", result}};
+    send(resp);
+    printInfo(LogLevel::INFO, "[云端指令] 回执已发送到 " + config_.gateway_ws_url + ", 指令ID: " + cmd_id + ", 内容: " + resp.dump());
 }
 
 void EdgeManager::processPendingSnapshotRequest() {
@@ -653,9 +1087,6 @@ void EdgeManager::recordPlayStart(const PlayItem& item) {
             pos += 2;
         }
 
-        // 使用事务，保证操作原子性
-        db_->beginTransaction();
-
         // 1. 插入当前播放记录
         std::string sql = "INSERT INTO playlist (ad_id, file_path, type, duration, volume, priority) VALUES ('"
             + item.getAdId() + "', '"
@@ -669,10 +1100,7 @@ void EdgeManager::recordPlayStart(const PlayItem& item) {
         // 2. 清理旧记录 (保留最近 50 条)
         db_->execute("DELETE FROM playlist WHERE id NOT IN (SELECT id FROM playlist ORDER BY id DESC LIMIT 50);");
 
-        db_->commit();
-
     } catch (const std::exception& e) {
-        db_->rollback(); // 发生异常回滚
         printInfo(LogLevel::ERROR, "记录播放开始失败: " + std::string(e.what()));
     }
 }
@@ -690,19 +1118,14 @@ void EdgeManager::recordPlayEnd(const PlayItem& item, long long startTime, int d
     // 调用现有的 log 方法写入 log 表，指定为 PLAYBACK 类型
     log(item.getAdId(), item.getFilePath(), startTime, endTime, durationMs, statusCode, statusMsg, "PLAYBACK");
     
-    // 3. 更新状态 (使用事务)
+    // 3. 更新状态
     try {
-        db_->beginTransaction();
-        
         // 更新 last_played_time
         db_->execute("UPDATE advertisement SET last_played_time = " + std::to_string(endTime) + " WHERE ad_id = '" + item.getAdId() + "';");
 
-        // 如果是插播素材，更新 schedule_interrupt 表的状态为已播放
-        db_->execute("UPDATE schedule_interrupt SET status = 1 WHERE ad_id = '" + item.getAdId() + "' AND status = 0;");
-        
-        db_->commit();
+        // 如果是插播素材，播放完成后清理 command 插播记录，避免残留影响后续调度
+        db_->execute("DELETE FROM schedule_interrupt WHERE ad_id = '" + item.getAdId() + "' AND trigger_type = 'command';");
     } catch (const std::exception& e) {
-        db_->rollback();
         printInfo(LogLevel::ERROR, "更新播放状态失败: " + std::string(e.what()));
     }
 }
@@ -775,7 +1198,7 @@ bool EdgeManager::ensurePlayableAsset(const PlayItem& item, std::string& reason)
     } catch (...) {}
 
     auto verifyMd5IfNeeded = [&](std::string& verifyReason) -> bool {
-        if (expectedMd5.empty()) {
+        if (!kEnableMd5Verification || expectedMd5.empty()) {
             return true;
         }
         std::string actual;
@@ -819,7 +1242,7 @@ bool EdgeManager::ensurePlayableAsset(const PlayItem& item, std::string& reason)
             return false;
         }
 
-        printInfo(LogLevel::INFO, "素材缺失或损坏，尝试下载: ad_id=" + item.getAdId() + ", filename=" + filename + ", attempt=" + std::to_string(attempt) + "/" + std::to_string(retryCount));
+        printInfo(LogLevel::INFO, "素材缺失，尝试下载: ad_id=" + item.getAdId() + ", filename=" + filename + ", attempt=" + std::to_string(attempt) + "/" + std::to_string(retryCount));
         auto result = network_->downloadAdFileDetailed(item.getAdId(), filename, savePath);
         if (result.success) {
             continue;
@@ -908,38 +1331,80 @@ std::unique_ptr<PlayItem> EdgeManager::getNextAsset() {
                 json playlistJson = json::parse(playlistStr);
                 
                 if (playlistJson.empty()) continue;
-                
-                // 获取当前索引的素材 ID
-                if (current_playlist_index_ >= playlistJson.size()) {
-                    current_playlist_index_ = 0; // 循环
+
+                // 查询当前时间槽内每个广告的优先级映射（来自 playlist_raw）
+                std::unordered_map<std::string, int> adPriorityMap;
+                try {
+                    auto pRows = db_->query("SELECT ad_id, priority FROM schedule_timeslot_ad_priority WHERE slot_id = " + std::to_string(slotId) + ";");
+                    for (const auto& pr : pRows) {
+                        auto itAd = pr.find("ad_id");
+                        auto itP = pr.find("priority");
+                        if (itAd == pr.end() || itP == pr.end()) {
+                            continue;
+                        }
+                        int p = 1;
+                        try { p = std::stoi(itP->second); } catch (...) { p = 1; }
+                        auto found = adPriorityMap.find(itAd->second);
+                        if (found == adPriorityMap.end() || p > found->second) {
+                            adPriorityMap[itAd->second] = p;
+                        }
+                    }
+                } catch (...) {}
+
+                // 槽内规则：优先级大的先播，同优先级轮转
+                int highestPriority = std::numeric_limits<int>::min();
+                std::vector<std::string> candidates;
+
+                for (const auto& ad : playlistJson) {
+                    if (!ad.is_string()) {
+                        continue;
+                    }
+                    std::string adId = ad.get<std::string>();
+                    int p = 1;
+                    auto it = adPriorityMap.find(adId);
+                    if (it != adPriorityMap.end()) {
+                        p = it->second;
+                    }
+
+                    if (p > highestPriority) {
+                        highestPriority = p;
+                        candidates.clear();
+                        candidates.push_back(adId);
+                    } else if (p == highestPriority) {
+                        candidates.push_back(adId);
+                    }
                 }
-                
-                std::string adId = playlistJson[current_playlist_index_].get<std::string>();
-                
-                // 查询素材详情
-                std::string adSql = "SELECT * FROM advertisement WHERE ad_id = '" + adId + "';";
-                auto ads = db_->query(adSql);
-                if (!ads.empty()) {
+
+                if (candidates.empty()) {
+                    continue;
+                }
+
+                std::string rrKey = std::to_string(slotId) + ":" + std::to_string(highestPriority);
+                size_t& rrIndex = slot_priority_rr_index_[rrKey];
+                size_t base = rrIndex % candidates.size();
+
+                for (size_t offset = 0; offset < candidates.size(); ++offset) {
+                    std::string adId = candidates[(base + offset) % candidates.size()];
+                    std::string adSql = "SELECT * FROM advertisement WHERE ad_id = '" + adId + "';";
+                    auto ads = db_->query(adSql);
+                    if (ads.empty()) {
+                        printInfo(LogLevel::WARNING, "素材未找到: " + adId);
+                        continue;
+                    }
+
                     auto& adRow = ads[0];
                     std::string filePath = config_.resources_dir + "ads/" + adRow.at("filename");
                     int volume = std::stoi(row.at("volume"));
-                    int priority = std::stoi(row.at("priority"));
-                    
-                    auto item = std::make_unique<PlayItem>(
-                        adId, filePath, 
-                        adRow.at("type"), 
-                        std::stoi(adRow.at("duration")), 
+
+                    rrIndex = (base + offset + 1) % candidates.size();
+                    return std::make_unique<PlayItem>(
+                        adId,
+                        filePath,
+                        adRow.at("type"),
+                        std::stoi(adRow.at("duration")),
                         volume,
-                        priority
+                        highestPriority
                     );
-                    
-                    // 递增索引，为下一次调用做准备
-                    current_playlist_index_++;
-                    
-                    return item;
-                } else {
-                    printInfo(LogLevel::WARNING, "素材未找到: " + adId);
-                    current_playlist_index_++; // 即使没找到也要跳过，避免死循环
                 }
             }
         }
@@ -1346,6 +1811,33 @@ bool EdgeManager::initDatabase() {
             ");";
         db_->execute(createLogTableSQL);
 
+        // 向后兼容：旧版本数据库可能缺少部分列，按需补齐避免运行时报错
+        try {
+            auto cols = db_->query("PRAGMA table_info(log);");
+            std::unordered_set<std::string> existing;
+            for (const auto& row : cols) {
+                auto it = row.find("name");
+                if (it != row.end()) {
+                    existing.insert(it->second);
+                }
+            }
+
+            if (existing.find("device_ip") == existing.end()) {
+                db_->execute("ALTER TABLE log ADD COLUMN device_ip TEXT;");
+            }
+            if (existing.find("firmware_version") == existing.end()) {
+                db_->execute("ALTER TABLE log ADD COLUMN firmware_version TEXT;");
+            }
+            if (existing.find("log_type") == existing.end()) {
+                db_->execute("ALTER TABLE log ADD COLUMN log_type TEXT DEFAULT 'PLAYBACK';");
+            }
+            if (existing.find("uploaded") == existing.end()) {
+                db_->execute("ALTER TABLE log ADD COLUMN uploaded INTEGER DEFAULT 0;");
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "log 表迁移检查失败: " << e.what() << std::endl;
+        }
+
         // 2. 广告素材表 (advertisement)
         std::string createAdTableSQL = 
             "CREATE TABLE IF NOT EXISTS advertisement ("
@@ -1401,6 +1893,17 @@ bool EdgeManager::initDatabase() {
             "FOREIGN KEY(policy_id) REFERENCES schedule(policy_id)"
             ");";
         db_->execute(createTimeSlotTableSQL);
+
+        // 4.1 时间段内广告优先级映射表
+        std::string createSlotAdPriorityTableSQL =
+            "CREATE TABLE IF NOT EXISTS schedule_timeslot_ad_priority ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "policy_id TEXT NOT NULL, "
+            "slot_id INTEGER NOT NULL, "
+            "ad_id TEXT NOT NULL, "
+            "priority INTEGER DEFAULT 1"
+            ");";
+        db_->execute(createSlotAdPriorityTableSQL);
 
         // 5. 播放列表表 (playlist)
         std::string createPlaylistTableSQL = 
@@ -1539,7 +2042,9 @@ bool EdgeManager::syncSchedule() {
         // 单设备仅保留一套生效策略，避免历史策略残留导致混播。
         db_->execute("DELETE FROM schedule_interrupt;");
         db_->execute("DELETE FROM schedule_timeslot;");
+        db_->execute("DELETE FROM schedule_timeslot_ad_priority;");
         db_->execute("DELETE FROM schedule;");
+        slot_priority_rr_index_.clear();
 
         // 1. 插入 schedule 表
         std::string scheduleSQL = "REPLACE INTO schedule (policy_id, effective_date, download_base_url, default_volume, download_retry_count, report_interval_sec) VALUES ('"
@@ -1578,7 +2083,71 @@ bool EdgeManager::syncSchedule() {
             db_->execute(slotSQL);
         }
 
+        // 3.1 根据 playlist_raw 构建“时间槽内广告优先级”映射
+        std::unordered_map<std::string, int> rangeToSlotId;
+        for (const auto& slot : schedule.getTimeSlots()) {
+            rangeToSlotId[slot.getTimeRange()] = slot.getSlotId();
+        }
+
+        auto sqlEscape = [](std::string v) {
+            size_t pos = 0;
+            while ((pos = v.find('\'', pos)) != std::string::npos) {
+                v.replace(pos, 1, "''");
+                pos += 2;
+            }
+            return v;
+        };
+
+        if (j.contains("playlist_raw") && j["playlist_raw"].is_array()) {
+            for (const auto& raw : j["playlist_raw"]) {
+                if (!raw.is_object()) {
+                    continue;
+                }
+                std::string adId = raw.value("id", "");
+                int adPriority = raw.value("priority", 1);
+                if (adId.empty()) {
+                    continue;
+                }
+
+                if (raw.contains("slots") && raw["slots"].is_array()) {
+                    for (const auto& slotRaw : raw["slots"]) {
+                        if (!slotRaw.is_string()) {
+                            continue;
+                        }
+                        std::string edgeRange = normalizeRawSlotToEdgeRange(slotRaw.get<std::string>());
+                        auto it = rangeToSlotId.find(edgeRange);
+                        if (edgeRange.empty() || it == rangeToSlotId.end()) {
+                            continue;
+                        }
+
+                        std::string insertSQL = "INSERT INTO schedule_timeslot_ad_priority (policy_id, slot_id, ad_id, priority) VALUES ('"
+                            + sqlEscape(schedule.getPolicyId()) + "', "
+                            + std::to_string(it->second) + ", '"
+                            + sqlEscape(adId) + "', "
+                            + std::to_string(adPriority) + ");";
+                        db_->execute(insertSQL);
+                    }
+                }
+            }
+        }
+
+        // 若云端未提供 playlist_raw，则按 time_slots 默认优先级补齐映射，保障调度逻辑可运行
+        auto cntRows = db_->query("SELECT COUNT(1) AS c FROM schedule_timeslot_ad_priority;");
+        if (!cntRows.empty() && cntRows[0].count("c") && std::stoi(cntRows[0].at("c")) == 0) {
+            for (const auto& slot : schedule.getTimeSlots()) {
+                for (const auto& adId : slot.getPlaylist()) {
+                    std::string insertSQL = "INSERT INTO schedule_timeslot_ad_priority (policy_id, slot_id, ad_id, priority) VALUES ('"
+                        + sqlEscape(schedule.getPolicyId()) + "', "
+                        + std::to_string(slot.getSlotId()) + ", '"
+                        + sqlEscape(adId) + "', "
+                        + std::to_string(slot.getPriority()) + ");";
+                    db_->execute(insertSQL);
+                }
+            }
+        }
+
         db_->commit();
+
         network_->reportSyncResult("schedule", "success", "排期同步成功");
         return true;
 

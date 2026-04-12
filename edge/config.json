@@ -4,8 +4,8 @@
     "ads_config_path": "resources/Ads.json",
     "schedule_config_path": "resources/Schedule.json",
     "gateway_ws_url": "ws://192.168.31.200:8080/ws",
-    "device_id": "ELEV_002",
-    "token": "sk_86966333ae464e70b1b0e718515614a7",
+    "device_id": "ELEV_001",
+    "token": "sk_4039b36f63144484983d1a0d70699640",
     "log_level": 1
 }
  

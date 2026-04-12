@@ -89,6 +89,22 @@ public:
     DownloadResult downloadAdFileDetailed(const std::string& adId, const std::string& filename, const std::string& savePath);
 
     /**
+     * @brief 通过完整 URL 直接下载素材到本地
+     * @param url 完整下载地址 (http/https)
+     * @param savePath 本地保存路径
+     * @return DownloadResult success/httpStatus/reason
+     */
+    DownloadResult downloadFileFromUrlDetailed(const std::string& url, const std::string& savePath);
+
+    /**
+     * @brief 通过完整 URL 直接下载素材到本地
+     * @param url 完整下载地址 (http/https)
+     * @param savePath 本地保存路径
+     * @return true 下载成功
+     */
+    bool downloadFileFromUrl(const std::string& url, const std::string& savePath);
+
+    /**
      * @brief 向网关汇报同步结果
      * @param type 同步类型 ("ads" 或 "schedule")
      * @param status 状态 ("success" 或 "failed")
