@@ -230,9 +230,9 @@ json NetworkClient::fetchSchedule() {
     return json::object();
 }
 
-bool NetworkClient::downloadAdFile(const std::string& adId, const std::string& filename, const std::string& savePath) {
+NetworkClient::DownloadResult NetworkClient::downloadAdFileDetailed(const std::string& adId, const std::string& filename, const std::string& savePath) {
     if ((adId.empty() && filename.empty()) || savePath.empty()) {
-        return false;
+        return {false, 0, "invalid_argument"};
     }
 
     try {
@@ -243,55 +243,71 @@ bool NetworkClient::downloadAdFile(const std::string& adId, const std::string& f
         }
 
         httplib::Client cli(apiUrl_);
+        DownloadResult lastResult{false, 0, "network_failure"};
 
-        auto doDownload = [&](const std::string& path, const std::string& tag) -> bool {
+        auto doDownload = [&](const std::string& path, const std::string& tag) -> DownloadResult {
             auto res = cli.Get(path.c_str());
-            if (!res || res->status != 200) {
+            if (!res) {
                 std::cerr << "[NetworkClient] 下载素材失败(" << tag << ") status="
-                          << (res ? std::to_string(res->status) : "无法连接") << std::endl;
-                return false;
+                          << "无法连接" << std::endl;
+                return {false, 0, "network_failure"};
+            }
+
+            if (res->status != 200) {
+                std::cerr << "[NetworkClient] 下载素材失败(" << tag << ") status="
+                          << std::to_string(res->status) << std::endl;
+                if (res->status == 404) {
+                    return {false, 404, "http_404"};
+                }
+                return {false, res->status, "http_error"};
             }
 
             std::ofstream ofs(savePath, std::ios::binary);
             if (!ofs.is_open()) {
                 std::cerr << "[NetworkClient] 无法写入素材文件: " << savePath << std::endl;
-                return false;
+                return {false, 0, "write_file_failed"};
             }
             ofs.write(res->body.data(), static_cast<std::streamsize>(res->body.size()));
             ofs.close();
-            return true;
+            return {true, 200, "ok"};
         };
 
-        bool ok = false;
+        DownloadResult result{false, 0, "network_failure"};
 
         if (!adId.empty()) {
             std::string path = "/api/material/file?device_id=" + deviceId_ + "&ad_id=" + adId;
             if (!token_.empty()) {
                 path += "&token=" + token_;
             }
-            ok = doDownload(path, "ad_id=" + adId);
+            result = doDownload(path, "ad_id=" + adId);
+            lastResult = result;
         }
 
-        if (!ok && !filename.empty()) {
+        if (!result.success && !filename.empty()) {
             std::string path = "/api/material/file?device_id=" + deviceId_ + "&filename=" + filename;
             if (!token_.empty()) {
                 path += "&token=" + token_;
             }
-            ok = doDownload(path, "filename=" + filename);
+            result = doDownload(path, "filename=" + filename);
+            lastResult = result;
         }
 
-        if (!ok) {
-            return false;
+        if (!result.success) {
+            return lastResult;
         }
 
         std::cout << "[NetworkClient] 素材下载成功 ad_id=" << adId << " filename=" << filename
                   << " -> " << savePath << std::endl;
-        return true;
+        return {true, 200, "ok"};
     } catch (const std::exception& e) {
         std::cerr << "[NetworkClient] 下载素材异常 ad_id=" << adId << " filename=" << filename
                   << " err=" << e.what() << std::endl;
-        return false;
+        return {false, 0, std::string("exception: ") + e.what()};
     }
+}
+
+bool NetworkClient::downloadAdFile(const std::string& adId, const std::string& filename, const std::string& savePath) {
+    return downloadAdFileDetailed(adId, filename, savePath).success;
 }
 
 bool NetworkClient::reportSyncResult(const std::string& type, const std::string& status, const std::string& detail) {

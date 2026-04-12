@@ -292,6 +292,19 @@ private:
     bool waitForPlaybackOrStop();
 
     /**
+     * @brief 播放前素材可用性检查
+     *
+     * 基于当前排期计算出的播放项，检查本地文件是否可用；若缺失则尝试从网关下载。
+     * 仅当素材可用时才允许加入播放列表并开始播放。
+     *
+     * @param item 当前待播放项
+     * @param reason 失败原因
+     * @return true 素材可用
+     * @return false 素材不可用
+     */
+    bool ensurePlayableAsset(const PlayItem& item, std::string& reason);
+
+    /**
      * @brief 处理来自云端的指令
      * 
      * @param msg 接收到的云端消息 (JSON)
